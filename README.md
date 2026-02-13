@@ -536,7 +536,7 @@ This project is licensed under the **MIT License** - see [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ by Onyx**
+**Built with ❤️ by Samir Kharel (Onyx)**
 
 [⬆ Back to Top](#-callbreak-casino---web3-card-game)
 
