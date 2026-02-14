@@ -364,7 +364,7 @@ Bid 3, Won 5: +30 + 0.2 = 30.2 points (2 over tricks)
 ### Production Deployment
 
 #### Prerequisites
-- Base Mainnet ETH (~0.6 for deployment + bond)
+- Base Mainnet ETH ( ~0.1 for deployment + bond)
 - MongoDB Atlas account
 - Vercel account (frontend)
 - Railway/Render account (backend)
@@ -531,6 +531,7 @@ This project is licensed under the **MIT License** - see [LICENSE](LICENSE) file
 - [Base](https://base.org/) - L2 blockchain platform
 - [Vercel](https://vercel.com/) - Frontend hosting
 - [MongoDB](https://mongodb.com/) - Database platform
+- [Railway](https://railway.com/) - Server hosting
 
 ---
 
