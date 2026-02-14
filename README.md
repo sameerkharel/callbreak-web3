@@ -268,7 +268,7 @@ BaseScan          - Block explorer
 ### Contract Details
 
 - **Network**: Base Mainnet (Chain ID: 8453)
-- **Address**: `0x...` (see [deployment](#deployment))
+- **Address**: `0x1f694A543E7F0dFbba61AcEd1c352AF6cE030175` (see [deployment](#deployment))
 - **Compiler**: Solidity 0.8.20
 - **License**: MIT
 
