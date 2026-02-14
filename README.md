@@ -9,7 +9,7 @@
 
 **A provably fair, blockchain-powered CallBreak card game with real ETH wagering**
 
-[Live Demo](https://callbreak.vercel.app) • [Documentation](#-documentation) • [Report Bug](https://github.com/sameerkharel/callbreak-web3/issues) • [Request Feature](https://github.com/sameerkharel/callbreak-web3/issues)
+[Live Demo](https://callbreak.up.railway.app/) • [Documentation](#-documentation) • [Report Bug](https://github.com/sameerkharel/callbreak-web3/issues) • [Request Feature](https://github.com/sameerkharel/callbreak-web3/issues)
 
 </div>
 
