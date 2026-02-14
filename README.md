@@ -1,8 +1,8 @@
-# 🃏 CallBreak Casino - Web3 Card Game
+# 🃏 CallBreak web3 - Web3 Card Game
 
 <div align="center">
 
-![CallBreak Casino](https://img.shields.io/badge/CallBreak-Casino-8B5CF6?style=for-the-badge&logo=ethereum&logoColor=white)
+![CallBreak web3](https://img.shields.io/badge/CallBreak-web3-8B5CF6?style=for-the-badge&logo=ethereum&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js&logoColor=white)
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.20-363636?style=for-the-badge&logo=solidity&logoColor=white)
 ![Base](https://img.shields.io/badge/Base-Mainnet-0052FF?style=for-the-badge&logo=coinbase&logoColor=white)
@@ -33,9 +33,9 @@
 
 ## 🎯 Overview
 
-CallBreak Casino is a **fully on-chain card game** built on Base Network, combining traditional CallBreak gameplay with Web3 technology. Players wager real ETH in a provably fair environment where game outcomes are cryptographically guaranteed.
+CallBreak web3 is a **fully on-chain card game** built on Base Network, combining traditional CallBreak gameplay with Web3 technology. Players wager real ETH in a provably fair environment where game outcomes are cryptographically guaranteed.
 
-### Why CallBreak Casino?
+### Why CallBreak web3?
 
 - ✅ **Provably Fair**: Commit-reveal randomness ensures no cheating
 - ✅ **Trustless Escrow**: Smart contracts hold funds, no intermediaries
@@ -61,7 +61,7 @@ CallBreak Casino is a **fully on-chain card game** built on Base Network, combin
 - **Multi-Sig Admin**: Dispute resolution requires multiple admin signatures
 
 ### 🎨 User Experience
-- **Cyberpunk UI**: Neon-themed casino aesthetic with glassmorphism
+- **Cyberpunk UI**: Neon-themed web3 aesthetic with glassmorphism
 - **Wallet Integration**: MetaMask, WalletConnect, Coinbase Wallet support
 - **Activity Dashboard**: Track game history, pending challenges, claimable prizes
 - **Responsive Design**: Works on desktop, tablet, and mobile
@@ -187,7 +187,7 @@ BaseScan          - Block explorer
 1. **Clone the repository**
    ```bash
    git clone https://github.com/sameerkharel/callbreak-web3.git
-   cd callbreak-casino
+   cd callbreak-web3
    ```
 
 2. **Install dependencies**
@@ -539,6 +539,6 @@ This project is licensed under the **MIT License** - see [LICENSE](LICENSE) file
 
 **Built with ❤️ by Samir Kharel (Onyx)**
 
-[⬆ Back to Top](#-callbreak-casino---web3-card-game)
+[⬆ Back to Top](#-callbreak-web3---web3-card-game)
 
 </div>
