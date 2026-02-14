@@ -3,7 +3,7 @@ import React from 'react';
 
 const Card = ({ card, onClick, isPlayable }: any) => {
   const isRed = card.s === 'H' || card.s === 'D';
-  const label = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' }[card.r] || card.r;
+  const label = (({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A' } as any)[card.r]) || card.r;
   const suit = { 'S':'♠', 'H':'♥', 'D':'♦', 'C':'♣' }[card.s as string];
   
   return (
