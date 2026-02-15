@@ -28,7 +28,8 @@ const Scoreboard = ({
     const [canAnyoneSubmit, setCanAnyoneSubmit] = useState(false);
     const [timeUntilOpen, setTimeUntilOpen] = useState(10);
 
-    const isGameOver = !!gameResultData || (scores.length >= 5);
+    // Check if game is technically over (data present OR max rounds reached)
+    const isGameOver = !!gameResultData || (scores.length >= 3); // Assuming 3 is max rounds, adjusted logic
     
     const winnerIndex = players.reduce((iMax, x, i, arr) => x.totalScore > arr[iMax].totalScore ? i : iMax, 0);
     const winner = players[winnerIndex];
@@ -42,7 +43,7 @@ const Scoreboard = ({
 
     // ✅ TIMER LOGIC: Count down 10s for non-winners
     useEffect(() => {
-        if (!isWeb3Game || isSubmitted) return;
+        if (!isWeb3Game || isSubmitted || !isGameOver) return;
         
         // If I am the winner, I can submit immediately (no timer needed)
         if (isMeWinner) {
@@ -62,7 +63,7 @@ const Scoreboard = ({
         }, 1000);
         
         return () => clearInterval(interval);
-    }, [isWeb3Game, isSubmitted, isMeWinner]);
+    }, [isWeb3Game, isSubmitted, isMeWinner, isGameOver]);
 
     const handleSubmit = async () => {
         if (!onSubmitToChain) return;
@@ -275,93 +276,123 @@ const Scoreboard = ({
               <div className="p-8 border-t border-white/5" 
                 style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.5) 0%, rgba(30,41,59,0.3) 100%)' }}>
                 
-                {isGameOver && isWeb3Game ? (
-                  <div className="space-y-4">
-                    
-                    {/* 1. SUBMIT BUTTON */}
-                    {!isSubmitted && (
-                        <>
-                            {showSubmitButton ? (
-                                <div className="animate-fade-in">
-                                    <button 
-                                        onClick={handleSubmit} 
-                                        disabled={isProcessing}
-                                        className="w-full py-5 rounded-2xl font-black text-xl tracking-wider uppercase relative overflow-hidden group"
-                                        style={{
-                                            fontFamily: 'Orbitron, monospace',
-                                            background: isProcessing 
-                                            ? 'linear-gradient(135deg, #475569 0%, #334155 100%)'
-                                            : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', // Gold/Orange for Submit
-                                            border: '2px solid',
-                                            borderColor: isProcessing ? '#64748b' : '#fbbf24',
-                                            boxShadow: isProcessing ? 'none' : '0 0 40px rgba(245,158,11,0.4)',
-                                            cursor: isProcessing ? 'wait' : 'pointer'
-                                        }}
-                                    >
-                                        <span className="relative z-10 flex items-center justify-center gap-3 text-white">
-                                            {isProcessing ? '⏳ PROCESSING...' : '🚀 SUBMIT RESULT TO CHAIN'}
-                                        </span>
-                                    </button>
-                                    <p className="text-slate-500 text-xs mt-3 text-center">
-                                        * Submit to unlock matchmaking. Winners claim funds in Activity tab.
-                                    </p>
-                                </div>
-                            ) : (
-                                /* WAITING STATE */
-                                <div className="w-full py-4 rounded-2xl bg-slate-800/50 border border-slate-700 text-center">
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-center gap-3">
-                                            <div className="w-5 h-5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
-                                            <span className="text-yellow-200 font-bold tracking-wide uppercase">Waiting for Winner...</span>
+                {isGameOver ? (
+                    // === GAME OVER STATE ===
+                    isWeb3Game ? (
+                        // WEB3 FOOTER (Submit Logic)
+                        <div className="space-y-4">
+                            {!isSubmitted && (
+                                <>
+                                    {showSubmitButton ? (
+                                        <div className="animate-fade-in">
+                                            <button 
+                                                onClick={handleSubmit} 
+                                                disabled={isProcessing}
+                                                className="w-full py-5 rounded-2xl font-black text-xl tracking-wider uppercase relative overflow-hidden group"
+                                                style={{
+                                                    fontFamily: 'Orbitron, monospace',
+                                                    background: isProcessing 
+                                                    ? 'linear-gradient(135deg, #475569 0%, #334155 100%)'
+                                                    : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', // Gold/Orange for Submit
+                                                    border: '2px solid',
+                                                    borderColor: isProcessing ? '#64748b' : '#fbbf24',
+                                                    boxShadow: isProcessing ? 'none' : '0 0 40px rgba(245,158,11,0.4)',
+                                                    cursor: isProcessing ? 'wait' : 'pointer'
+                                                }}
+                                            >
+                                                <span className="relative z-10 flex items-center justify-center gap-3 text-white">
+                                                    {isProcessing ? '⏳ PROCESSING...' : '🚀 SUBMIT RESULT TO CHAIN'}
+                                                </span>
+                                            </button>
+                                            <p className="text-slate-500 text-xs mt-3 text-center">
+                                                * Submit to unlock matchmaking. Winners claim funds in Activity tab.
+                                            </p>
                                         </div>
-                                        <p className="text-slate-500 text-xs font-mono">
-                                            Any player can submit in <span className="text-white font-bold">{timeUntilOpen}s</span>
-                                        </p>
-                                    </div>
-                                </div>
+                                    ) : (
+                                        /* WAITING STATE */
+                                        <div className="w-full py-4 rounded-2xl bg-slate-800/50 border border-slate-700 text-center">
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-center gap-3">
+                                                    <div className="w-5 h-5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+                                                    <span className="text-yellow-200 font-bold tracking-wide uppercase">Waiting for Winner...</span>
+                                                </div>
+                                                <p className="text-slate-500 text-xs font-mono">
+                                                    Any player can submit in <span className="text-white font-bold">{timeUntilOpen}s</span>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
-                        </>
-                    )}
 
-                    {/* 2. REQUEUE / EXIT BUTTONS */}
-                    <div className="flex gap-3 mt-4">
-                        <button 
-                            onClick={onRequeue}
-                            disabled={!isSubmitted} // ✅ BLOCKED UNTIL SUBMITTED
-                            className="flex-1 py-4 rounded-xl font-bold tracking-wide uppercase group relative overflow-hidden text-white transition-all"
-                            style={{
-                                fontFamily: 'Orbitron, monospace',
-                                background: isSubmitted 
-                                    ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' // Blue (Active)
-                                    : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', // Dark (Disabled)
-                                border: isSubmitted ? '1px solid #60a5fa' : '1px solid #334155',
-                                opacity: isSubmitted ? 1 : 0.5,
-                                cursor: isSubmitted ? 'pointer' : 'not-allowed',
-                                boxShadow: isSubmitted ? '0 0 30px rgba(59,130,246,0.3)' : 'none'
-                            }}
-                        >
-                            <span className="relative z-10 flex items-center justify-center gap-2">
-                                <span className="text-xl">🔥</span> FIND NEXT MATCH
-                            </span>
-                        </button>
+                            {/* REQUEUE / EXIT BUTTONS */}
+                            <div className="flex gap-3 mt-4">
+                                <button 
+                                    onClick={onRequeue}
+                                    disabled={!isSubmitted} // ✅ BLOCKED UNTIL SUBMITTED
+                                    className="flex-1 py-4 rounded-xl font-bold tracking-wide uppercase group relative overflow-hidden text-white transition-all"
+                                    style={{
+                                        fontFamily: 'Orbitron, monospace',
+                                        background: isSubmitted 
+                                            ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' // Blue (Active)
+                                            : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', // Dark (Disabled)
+                                        border: isSubmitted ? '1px solid #60a5fa' : '1px solid #334155',
+                                        opacity: isSubmitted ? 1 : 0.5,
+                                        cursor: isSubmitted ? 'pointer' : 'not-allowed',
+                                        boxShadow: isSubmitted ? '0 0 30px rgba(59,130,246,0.3)' : 'none'
+                                    }}
+                                >
+                                    <span className="relative z-10 flex items-center justify-center gap-2">
+                                        <span className="text-xl">🔥</span> FIND NEXT MATCH
+                                    </span>
+                                </button>
 
-                        <button 
-                            onClick={onExit}
-                            className="px-8 py-4 rounded-xl font-bold uppercase tracking-wide text-[#cbd5e1]"
-                            style={{
-                                fontFamily: 'Orbitron, monospace',
-                                background: 'rgba(71,85,105,0.3)',
-                                border: '1px solid rgba(100,116,139,0.3)',
-                            }}
-                        >
-                            EXIT
-                        </button>
-                    </div>
-                  </div>
+                                <button 
+                                    onClick={onExit}
+                                    className="px-8 py-4 rounded-xl font-bold uppercase tracking-wide text-[#cbd5e1]"
+                                    style={{
+                                        fontFamily: 'Orbitron, monospace',
+                                        background: 'rgba(71,85,105,0.3)',
+                                        border: '1px solid rgba(100,116,139,0.3)',
+                                    }}
+                                >
+                                    EXIT
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        // ✅ STANDARD WEB2 GAME OVER FOOTER
+                        <div className="flex gap-4">
+                            <button 
+                                onClick={onRequeue} 
+                                className="flex-1 py-5 rounded-2xl font-black text-lg uppercase tracking-widest relative overflow-hidden group text-white hover:scale-[1.02] transition-transform"
+                                style={{
+                                    fontFamily: 'Orbitron, monospace',
+                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                    border: '2px solid #34d399',
+                                    boxShadow: '0 0 30px rgba(16,185,129,0.3)',
+                                }}
+                            >
+                                <span className="relative z-10">PLAY NEXT GAME →</span>
+                            </button>
+                            
+                            <button 
+                                onClick={onExit} 
+                                className="px-8 py-5 rounded-2xl font-black text-lg uppercase tracking-widest relative overflow-hidden group text-red-200 hover:text-white transition-colors"
+                                style={{
+                                    fontFamily: 'Orbitron, monospace',
+                                    background: 'rgba(127,29,29,0.4)',
+                                    border: '2px solid rgba(239,68,68,0.3)',
+                                }}
+                            >
+                                <span className="relative z-10">EXIT</span>
+                            </button>
+                        </div>
+                    )
                 ) : (
-                  // STANDARD WEB2 FOOTER 
+                  // === ROUND OVER STATE (CONTINUE) ===
                   <button onClick={onClose} 
-                    className="w-full py-5 rounded-2xl font-black text-lg uppercase tracking-widest relative overflow-hidden group text-[#e2e8f0]"
+                    className="w-full py-5 rounded-2xl font-black text-lg uppercase tracking-widest relative overflow-hidden group text-[#e2e8f0] hover:bg-slate-800 transition-colors"
                     style={{
                       fontFamily: 'Orbitron, monospace',
                       background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',

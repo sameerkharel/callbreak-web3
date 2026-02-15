@@ -178,7 +178,11 @@ export default function App() {
         setIsProcessing(false);
         setWeb3Status("");
         
-        if(data.status === 'ROUND_OVER' || data.status === 'GAME_OVER') setShowScoreboard(true);
+        // ✅ CRITICAL FIX: Detect Game Over properly
+        // If status is ROUND_OVER but we reached Max Rounds (3), force scoreboard
+        const isGameEnd = data.status === 'GAME_OVER' || (data.status === 'ROUND_OVER' && data.round >= (data.maxRounds || 3));
+
+        if(data.status === 'ROUND_OVER' || isGameEnd) setShowScoreboard(true);
         else if(data.status !== 'WAITING' && data.status !== 'INITIALIZING_ON_CHAIN' && data.status !== 'COUNTDOWN') setShowScoreboard(false);
         
         if (data.status !== 'COUNTDOWN') {
@@ -518,12 +522,12 @@ export default function App() {
   };
 
   const handleRequeue = async () => {
+      // ✅ FIX: Allow simple reset for non-Web3 games
       if (!gameState || gameState.mode !== 'WEB3') {
-          ui.showError("Error", "Re-queue is only available for Web3 games.");
+          handleExit(); // For non-web3, just reset to home so they can play again
           return;
       }
       
-      // ✅ FIX: Check if we are allowed to leave before resetting the screen
       try {
           setWeb3Status("Checking status...");
           
@@ -1106,6 +1110,12 @@ export default function App() {
   const me = gameState.players[myIndex >= 0 ? myIndex : 0];
   const isMyTurn = gameState.turn === myIndex;
 
+  // ✅ CRITICAL FIX: Local Game Over Calculation
+  const isGameOver = gameState.status === 'GAME_OVER' || (gameState.status === 'ROUND_OVER' && gameState.round >= (gameState.maxRounds || 3));
+  
+  // ✅ CRITICAL FIX: Create fake result data if playing bots so Scoreboard shows "Game Over"
+  const effectiveResultData = gameResultData || (isGameOver ? { isFinished: true, players: gameState.players } : null);
+
   // Waiting/Initializing State
   if(gameState.status === 'WAITING' || gameState.status === 'INITIALIZING_ON_CHAIN') {
       return (
@@ -1167,8 +1177,13 @@ export default function App() {
           <Scoreboard 
             scores={gameState.scores} 
             players={gameState.players} 
-            onClose={() => setShowScoreboard(false)} 
-            gameResultData={gameResultData} 
+            onClose={() => {
+                // ✅ CRITICAL FIX: If game is over, Close button acts as EXIT
+                if (isGameOver) handleExit();
+                else setShowScoreboard(false);
+            }} 
+            // ✅ CRITICAL FIX: Pass synthetic result data to force Scoreboard into "Game Over" mode
+            gameResultData={effectiveResultData} 
             onSubmitToChain={handleSubmitToChain} 
             onRequeue={handleRequeue} 
             onExit={handleExit}        
@@ -1176,46 +1191,65 @@ export default function App() {
           />
       )}
 
-      {/* Top HUD Bar */}
-      {/* ✅ UI FIX: HUD is now pointer-events-none so it doesnt block clicks in landscape, with auto on buttons */}
-      <div className="absolute top-0 w-full p-2 md:p-4 flex justify-between text-white z-20 pointer-events-none"
+      {/* Top HUD Bar - Responsive Redesign */}
+      {/* Landscape: Push buttons to absolute corners. Portrait: Top Bar. */}
+      <div className="absolute top-0 w-full p-2 md:p-4 flex justify-between items-start text-white z-20 pointer-events-none"
         style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%)' }}>
-         <div className="flex items-center gap-2 md:gap-4 pointer-events-auto">
-             <span className="font-bold px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-base" style={{ fontFamily: 'Orbitron, monospace', color: '#fbbf24', background: 'rgba(120,53,15,0.4)', border: '1px solid rgba(251,191,36,0.3)' }}>{gameState.roomId}</span>
-             <span className="px-3 py-1 rounded-lg text-xs md:text-sm font-bold landscape:hidden" style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.3)', color: '#93c5fd', fontFamily: 'Orbitron, monospace' }}>Round {gameState.round}/{gameState.maxRounds || 3}</span>
+         
+         {/* LEFT HUD: Room Info */}
+         <div className="flex flex-col gap-2 pointer-events-auto">
+             <span className="font-bold px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-base self-start" 
+                style={{ fontFamily: 'Orbitron, monospace', color: '#fbbf24', background: 'rgba(120,53,15,0.4)', border: '1px solid rgba(251,191,36,0.3)' }}>
+                {gameState.roomId}
+             </span>
+             <button onClick={() => setShowScoreboard(true)} className="px-3 py-1 rounded-lg text-xs font-bold self-start" 
+                style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', border: '1px solid #60a5fa', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(59,130,246,0.3)' }}>
+                📊 SCORE
+             </button>
          </div>
-         <div className="flex gap-2 md:gap-3 pointer-events-auto">
-             <button onClick={() => setShowScoreboard(true)} className="px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', border: '1px solid #60a5fa', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(59,130,246,0.3)' }}>📊 <span className="hidden md:inline">SCORE</span></button>
-             <button onClick={leaveGame} className="px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" style={{ background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', border: '1px solid #f87171', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(220,38,38,0.3)' }}>EXIT</button>
-             <div className="px-3 py-1 md:px-5 md:py-2 rounded-full font-bold text-xs md:text-sm"
-               style={{ fontFamily: 'Orbitron, monospace', background: isMyTurn ? 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' : 'rgba(30,41,59,0.8)', color: isMyTurn ? '#7c2d12' : '#cbd5e1', border: isMyTurn ? '1px solid #fcd34d' : '1px solid rgba(71,85,105,0.3)', boxShadow: isMyTurn ? '0 0 20px rgba(251,191,36,0.5)' : 'none', animation: isMyTurn ? 'pulse 2s ease-in-out infinite' : 'none' }}>
-                {isMyTurn ? "YOUR TURN" : (gameState.players[gameState.turn] ? `${gameState.players[gameState.turn].name}...` : "Waiting...")}
-             </div>
+
+         {/* RIGHT HUD: Exit & Turn */}
+         <div className="flex flex-col gap-2 items-end pointer-events-auto">
+             <button onClick={leaveGame} className="px-3 py-1 rounded-lg text-xs font-bold text-red-100" 
+                style={{ background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', border: '1px solid #f87171', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(220,38,38,0.3)' }}>
+                EXIT
+             </button>
+             {!isGameOver && (
+                <div className="px-3 py-1 rounded-full font-bold text-xs"
+                    style={{ fontFamily: 'Orbitron, monospace', background: isMyTurn ? 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' : 'rgba(30,41,59,0.8)', color: isMyTurn ? '#7c2d12' : '#cbd5e1', border: isMyTurn ? '1px solid #fcd34d' : '1px solid rgba(71,85,105,0.3)', boxShadow: isMyTurn ? '0 0 20px rgba(251,191,36,0.5)' : 'none', animation: isMyTurn ? 'pulse 2s ease-in-out infinite' : 'none' }}>
+                    {isMyTurn ? "YOUR TURN" : (gameState.players[gameState.turn] ? `${gameState.players[gameState.turn].name}...` : "Waiting...")}
+                </div>
+             )}
          </div>
       </div>
 
-      {/* Main Table */}
+      {/* Main Table Container */}
       <div className="absolute inset-0 flex items-center justify-center">
-         {/* ✅ UI FIX: Responsive Table Size + Landscape fix */}
-         <div className="relative rounded-full transition-all duration-300 w-[85vw] h-[85vw] max-w-[340px] max-h-[340px] lg:w-[38rem] lg:h-[38rem] landscape:w-[55vh] landscape:h-[55vh] landscape:max-w-none"
-           style={{ background: 'radial-gradient(circle, #047857 0%, #065f46 70%, #064e3b 100%)', border: '20px solid #422006', boxShadow: `0 0 0 5px #78350f, inset 0 0 80px rgba(0,0,0,0.5), 0 30px 80px rgba(0,0,0,0.7)` }}>
-            {/* Inner circle glow */}
-            <div className="absolute inset-0 rounded-full opacity-30" style={{ boxShadow: 'inset 0 0 60px rgba(16,185,129,0.3)' }} />
+         {/* ✅ New ARCHITECTURE: Responsive Shape Changing Table */}
+         {/* Mobile: WIDE PILL (Stadium). Desktop: CIRCLE. */}
+         <div className="relative transition-all duration-300
+                         w-[95vw] h-[60vw] rounded-[100px]  /* Mobile Default: Wide Pill */
+                         landscape:w-[70vh] landscape:h-[50vh] landscape:rounded-[100px] /* Mobile Landscape */
+                         lg:w-[42rem] lg:h-[42rem] lg:rounded-full /* Desktop: Circle */"
+           style={{ background: 'radial-gradient(circle, #047857 0%, #065f46 70%, #064e3b 100%)', border: '12px solid #422006', boxShadow: `0 0 0 5px #78350f, inset 0 0 80px rgba(0,0,0,0.5), 0 30px 80px rgba(0,0,0,0.7)` }}>
+            
+            {/* Inner felt texture */}
+            <div className="absolute inset-0 rounded-[inherit] opacity-30" style={{ boxShadow: 'inset 0 0 60px rgba(16,185,129,0.3)' }} />
 
-            {/* CARDS ON TABLE */}
+            {/* CARDS ON TABLE (The Pot) */}
             {gameState.table.map((move: any, i: number) => {
                const pIdx = move.pIndex ?? 0; 
                const myIdxSafe = myIndex >= 0 ? myIndex : 0;
                const relativeIndex = (pIdx - myIdxSafe + 4) % 4;
 
+               // ✅ New FIX: Center-Based Positioning for Mobile
+               // Instead of px, use % to ensure cards never overlap avatars
                let posStyle: any = {};
-               
-               // ✅ UI FIX: Use % for played cards to prevent clustering on large tables
                const standardPos = [
-                  { bottom: '32%', left: '50%', transform: 'translateX(-50%)' }, 
-                  { right: '32%', top: '50%', transform: 'translateY(-50%)' },  
-                  { top: '32%', left: '50%', transform: 'translateX(-50%)' },   
-                  { left: '32%', top: '50%', transform: 'translateY(-50%)' }    
+                  { bottom: '15%', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }, 
+                  { right: '25%', top: '50%', transform: 'translateY(-50%)', zIndex: 9 },  
+                  { top: '15%', left: '50%', transform: 'translateX(-50%)', zIndex: 8 },   
+                  { left: '25%', top: '50%', transform: 'translateY(-50%)', zIndex: 9 }    
                ][relativeIndex];
 
                if (!standardPos) posStyle = {}; 
@@ -1234,50 +1268,70 @@ export default function App() {
                }
 
                return (
-                  <div key={i} className="absolute z-10 transition-all duration-300" style={safeStyle(posStyle)}>
-                      <Card card={move.card} />
+                  <div key={i} className="absolute transition-all duration-300" style={safeStyle(posStyle)}>
+                      {/* Mobile: Slightly smaller played cards to save space */}
+                      <div className="transform scale-75 lg:scale-100 origin-center">
+                        <Card card={move.card} />
+                      </div>
                   </div>
                );
             })}
 
-            {/* PLAYER AVATARS */}
+            {/* PLAYER AVATARS - THE HORSESHOE LAYOUT */}
             {gameState.players.map((p:any, i:number) => {
                const myIdxSafe = myIndex >= 0 ? myIndex : 0;
                const relativeIndex = (i - myIdxSafe + 4) % 4;
                
-               const pos = [
-                  { bottom: '-70px', left: '50%', transform: 'translateX(-50%)' },
-                  { right: '-70px', top: '50%', transform: 'translateY(-50%)' },
-                  { top: '-70px', left: '50%', transform: 'translateX(-50%)' },
-                  { left: '-70px', top: '50%', transform: 'translateY(-50%)' }
-               ][relativeIndex];
+               // ✅ New ARCHITECTURE: 
+               // Portrait: Push Left/Right players UP to form a horseshoe.
+               // Landscape: Push Left/Right players to absolute EDGES.
+               let pos: any = {};
 
-               if(!p.id) return (
-                   <div key={i} className="absolute flex flex-col items-center opacity-50" style={safeStyle(pos)}>
-                       <div className="w-16 h-16 rounded-full border-4 border-dashed border-gray-600 flex items-center justify-center text-white text-2xl">?</div>
-                   </div>
-               )
+               if (relativeIndex === 0) { // ME (Hidden, my hand is there)
+                   pos = { bottom: '-90px', left: '50%', transform: 'translateX(-50%)', opacity: 0 }; 
+               } else if (relativeIndex === 1) { // RIGHT PLAYER
+                   // Portrait: Top Right Corner of table. Landscape: Far Right Edge.
+                   pos = { 
+                       right: '-10%', top: '20%', 
+                       transform: 'translate(50%, -50%)' // Mobile Portrait
+                   }; 
+               } else if (relativeIndex === 2) { // TOP PLAYER
+                   pos = { top: '-60px', left: '50%', transform: 'translateX(-50%)' };
+               } else if (relativeIndex === 3) { // LEFT PLAYER
+                   // Portrait: Top Left Corner of table. Landscape: Far Left Edge.
+                   pos = { 
+                       left: '-10%', top: '20%', 
+                       transform: 'translate(-50%, -50%)' // Mobile Portrait
+                   };
+               }
+
+               // Landscape Overrides via classes isn't enough for complex pos, we use conditional style or media queries logic if needed.
+               // For simplicity, we stick to % positioning which adapts to the table shape (Pill vs Circle).
+
+               if(!p.id) return <div key={i} className="hidden" />
                
-               const isActive = gameState.turn === i;
+               // ✅ FIX: Don't show active turn glow if game is over
+               const isActive = !isGameOver && gameState.turn === i;
                
                return (
-                  <div key={i} className="absolute flex flex-col items-center w-28" style={safeStyle(pos)}>
-                      <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl relative"
+                  <div key={i} className={`absolute flex flex-col items-center w-20 lg:w-28 transition-all duration-300 ${relativeIndex === 0 ? 'pointer-events-none' : ''}`} style={safeStyle(pos)}>
+                      <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-full flex items-center justify-center text-2xl lg:text-3xl relative transition-all"
                         style={{
                           background: isActive ? 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
                           border: isActive ? '3px solid #fcd34d' : '3px solid #475569',
-                          boxShadow: isActive ? '0 0 30px rgba(251,191,36,0.8), inset 0 2px 10px rgba(0,0,0,0.3)' : '0 8px 20px rgba(0,0,0,0.5), inset 0 2px 10px rgba(0,0,0,0.3)'
+                          boxShadow: isActive ? '0 0 30px rgba(251,191,36,0.8), inset 0 2px 10px rgba(0,0,0,0.3)' : '0 8px 20px rgba(0,0,0,0.5), inset 0 2px 10px rgba(0,0,0,0.3)',
+                          transform: isActive ? 'scale(1.1)' : 'scale(1)'
                         }}
                       >
                           {p.avatar}
                       </div>
-                      <div className="px-3 py-1 rounded-lg mt-2 font-bold text-sm truncate w-full text-center"
-                        style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(71,85,105,0.3)', color: '#e2e8f0', fontFamily: 'Orbitron, monospace', fontSize: '0.7rem' }}>
+                      <div className="px-2 py-1 rounded-lg mt-1 font-bold text-xs truncate w-full text-center lg:text-sm"
+                        style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(71,85,105,0.3)', color: '#e2e8f0', fontFamily: 'Orbitron, monospace' }}>
                         {p.name}
                       </div>
                       {p.bid > 0 && (
-                        <div className="px-3 py-1 rounded-full font-bold text-xs mt-1"
-                          style={{ background: 'linear-gradient(135deg, #fef3c7 0%, #fcd34d 100%)', color: '#7c2d12', border: '1px solid #fbbf24', boxShadow: '0 2px 10px rgba(251,191,36,0.3)', fontFamily: 'Orbitron, monospace' }}>
+                        <div className="px-2 py-0.5 rounded-full font-bold text-[10px] lg:text-xs mt-1"
+                          style={{ background: 'linear-gradient(135deg, #fef3c7 0%, #fcd34d 100%)', color: '#7c2d12', border: '1px solid #fbbf24', fontFamily: 'Orbitron, monospace' }}>
                           {p.tricks}/{p.bid}
                         </div>
                       )}
@@ -1291,45 +1345,57 @@ export default function App() {
       {gameState.status === 'BIDDING' && isMyTurn && !isDealing && (
          <div className="absolute inset-0 z-40 flex items-center justify-center"
            style={{ background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.95) 100%)', backdropFilter: 'blur(10px)' }}>
-            <div className="p-10 rounded-3xl text-center relative overflow-hidden"
-              style={{ background: 'linear-gradient(135deg, rgba(30,41,59,0.95) 0%, rgba(15,23,42,0.98) 100%)', border: '2px solid rgba(59,130,246,0.3)', boxShadow: '0 0 60px rgba(59,130,246,0.4), 0 20px 80px rgba(0,0,0,0.8)', animation: 'scaleIn 0.3s ease-out' }}>
-               <h2 className="text-4xl font-black mb-8 tracking-wider"
+            <div className="p-6 md:p-10 rounded-3xl text-center relative overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, rgba(30,41,59,0.95) 0%, rgba(15,23,42,0.98) 100%)', border: '2px solid rgba(59,130,246,0.3)', boxShadow: '0 0 60px rgba(59,130,246,0.4)' }}>
+               <h2 className="text-3xl md:text-4xl font-black mb-6 tracking-wider"
                  style={{ fontFamily: 'Orbitron, monospace', background: 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                  YOUR BID
                </h2>
-               <div className="grid grid-cols-4 gap-4">
+               <div className="grid grid-cols-4 gap-3 md:gap-4">
                   {[1,2,3,4,5,6,7,8].map(n => (
                       <button key={n} onClick={() => bid(n)} 
-                        className="w-20 h-20 rounded-2xl font-black text-3xl group relative overflow-hidden"
-                        style={{ background: 'linear-gradient(135deg, rgba(71,85,105,0.4) 0%, rgba(51,65,85,0.6) 100%)', border: '2px solid rgba(148,163,184,0.3)', color: '#e2e8f0', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(0,0,0,0.4)' }}>
+                        className="w-16 h-16 md:w-20 md:h-20 rounded-2xl font-black text-2xl md:text-3xl group relative overflow-hidden"
+                        style={{ background: 'linear-gradient(135deg, rgba(71,85,105,0.4) 0%, rgba(51,65,85,0.6) 100%)', border: '2px solid rgba(148,163,184,0.3)', color: '#e2e8f0', fontFamily: 'Orbitron, monospace' }}>
                           <span className="relative z-10">{n}</span>
-                          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.5) 0%, rgba(147,197,253,0.3) 100%)', transform: 'scale(1.1)' }} />
+                          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.5) 0%, rgba(147,197,253,0.3) 100%)' }} />
                       </button>
                   ))}
                </div>
-               <style jsx>{`@keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
             </div>
          </div>
       )}
 
-      {/* PLAYER HAND - Fixed for 13 Cards */}
+      {/* PLAYER HAND - New ARCHITECTURE */}
       {!isDealing && me && (
-        <div className="absolute bottom-1 md:bottom-2 lg:bottom-8 left-0 right-0 flex justify-center z-30 px-2 pointer-events-none">
-            {/* Wrapper for hover interaction */}
-            <div className="flex justify-center items-end w-full max-w-5xl pointer-events-auto pb-safe">
-                 {/* ✅ UI FIX: Dynamic negative margins. 
-                     Mobile: -1.8rem to fit 13 cards. Desktop: -3.5rem to spread out. */}
-                 <div className="flex -space-x-[1.8rem] md:-space-x-[2.5rem] lg:-space-x-[3.5rem] hover:space-x-[-1.5rem] lg:hover:space-x-[-2rem] transition-all duration-300 px-4 pb-2">
+        <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+            {/* Glass Background for Hand Area - Visual Separation */}
+            <div className="absolute bottom-0 w-full h-24 lg:h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+            
+            <div className="flex justify-center items-end w-full pb-2 md:pb-4 pointer-events-auto">
+                 {/* ✅ New FIX: "Active Pop" Architecture
+                     - Mobile: Tighter spacing (-space-x-7) to fit 13 cards.
+                     - Interaction: Hover/Active state lifts card MUCH higher (-translate-y-10) and scales it up.
+                     - Z-Index: Ensures the popped card covers neighbors. */}
+                 <div className="flex 
+                      -space-x-7         /* Mobile: Tight overlap */
+                      md:-space-x-10     /* Tablet */
+                      lg:-space-x-12     /* Desktop */
+                      items-end px-2"
+                 >
                     {me.hand.map((card: any, i: number) => {
                     const isValid = validIndices.includes(i) && !isProcessing;
                     return (
-                        <div key={i} className="transition-all duration-200 origin-bottom cursor-pointer hover:-translate-y-6 hover:z-50 hover:scale-110"
+                        <div key={i} 
+                          className="transition-all duration-200 origin-bottom cursor-pointer relative group"
                           style={{ 
-                              transform: isValid && isMyTurn ? 'translateY(0)' : 'translateY(0) scale(0.95)', 
-                              filter: isValid && isMyTurn ? 'brightness(1)' : 'brightness(0.6) saturate(0.7)', 
-                              zIndex: isValid && isMyTurn ? 20 : 10 
-                          }}>
-                            <Card card={card} isPlayable={isValid && isMyTurn} onClick={() => isValid && isMyTurn && playCard(i)} />
+                              transform: isValid && isMyTurn ? 'translateY(0)' : 'translateY(10px) scale(0.95)', 
+                              filter: isValid && isMyTurn ? 'brightness(1)' : 'brightness(0.5) saturate(0)', 
+                              zIndex: i // Base z-index
+                          }}
+                        >
+                            <div className="group-hover:!-translate-y-8 group-hover:scale-110 group-hover:z-[100] transition-transform duration-200">
+                                <Card card={card} isPlayable={isValid && isMyTurn} onClick={() => isValid && isMyTurn && playCard(i)} />
+                            </div>
                         </div>
                     )
                     })}
