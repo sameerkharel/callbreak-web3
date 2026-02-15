@@ -27,16 +27,16 @@ export default function App() {
   const [screen, setScreen] = useState<'HOME' | 'GAME'>('HOME');
   const [menuState, setMenuState] = useState<MenuState>('MAIN');
   const [gameState, setGameState] = useState<any>(null);
-  
+   
   const [myId, setMyId] = useState("");
   const [username, setUsername] = useState("Player 1");
   const [userProfile, setUserProfile] = useState<any>(null); 
   const [joinCode, setJoinCode] = useState("");
-  
+   
   const [isDealing, setIsDealing] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false); 
-  
+   
   const [web3Status, setWeb3Status] = useState(""); 
   const [gameResultData, setGameResultData] = useState<any>(null);
   const [hasPendingFunds, setHasPendingFunds] = useState(false);
@@ -44,7 +44,7 @@ export default function App() {
   const [isLobby, setIsLobby] = useState(false); 
   const [countdown, setCountdown] = useState<number | null>(null); 
   const [lobbyPlayers, setLobbyPlayers] = useState<string[]>([]);
-  
+   
   const [isZombieState, setIsZombieState] = useState(false);
   const [zombieData, setZombieData] = useState<any>(null);
 
@@ -663,7 +663,7 @@ export default function App() {
       setCountdown(null);
       setWeb3Status("");
   };
-  
+   
   // ==========================
   //    UI RENDERERS
   // ==========================
@@ -1141,8 +1141,9 @@ export default function App() {
   const safeStyle = (styleObj: any) => styleObj || {};
 
   return (
-    <div className="min-h-screen overflow-hidden relative select-none" style={{ background: 'radial-gradient(ellipse at center, #065f46 0%, #064e3b 40%, #022c22 100%)' }}>
-      
+    // ✅ UI FIX: h-screen (not min-h) to prevent scroll bounce on mobile games
+    <div className="h-screen w-full overflow-hidden relative select-none" style={{ background: 'radial-gradient(ellipse at center, #065f46 0%, #064e3b 40%, #022c22 100%)' }}>
+       
       <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width="100" height="100" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noise"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" /%3E%3C/filter%3E%3Crect width="100" height="100" filter="url(%23noise)" opacity="0.3"/%3E%3C/svg%3E")', backgroundRepeat: 'repeat' }} />
 
       {/* Countdown Overlay */}
@@ -1161,7 +1162,7 @@ export default function App() {
       )}
 
       {isDealing && <DealingOverlay onComplete={() => setIsDealing(false)} />}
-      
+       
       {showScoreboard && (
           <Scoreboard 
             scores={gameState.scores} 
@@ -1176,16 +1177,17 @@ export default function App() {
       )}
 
       {/* Top HUD Bar */}
-      <div className="absolute top-0 w-full p-4 flex justify-between text-white z-20"
-        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%)', backdropFilter: 'blur(10px)' }}>
-         <div className="flex items-center gap-4">
-             <span className="font-bold px-4 py-2 rounded-lg" style={{ fontFamily: 'Orbitron, monospace', color: '#fbbf24', background: 'rgba(120,53,15,0.4)', border: '1px solid rgba(251,191,36,0.3)' }}>{gameState.roomId}</span>
-             <span className="px-3 py-1 rounded-lg text-sm font-bold" style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.3)', color: '#93c5fd', fontFamily: 'Orbitron, monospace' }}>Round {gameState.round}/{gameState.maxRounds || 3}</span>
+      {/* ✅ UI FIX: HUD is now pointer-events-none so it doesnt block clicks in landscape, with auto on buttons */}
+      <div className="absolute top-0 w-full p-2 md:p-4 flex justify-between text-white z-20 pointer-events-none"
+        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%)' }}>
+         <div className="flex items-center gap-2 md:gap-4 pointer-events-auto">
+             <span className="font-bold px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-base" style={{ fontFamily: 'Orbitron, monospace', color: '#fbbf24', background: 'rgba(120,53,15,0.4)', border: '1px solid rgba(251,191,36,0.3)' }}>{gameState.roomId}</span>
+             <span className="px-3 py-1 rounded-lg text-xs md:text-sm font-bold landscape:hidden" style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.3)', color: '#93c5fd', fontFamily: 'Orbitron, monospace' }}>Round {gameState.round}/{gameState.maxRounds || 3}</span>
          </div>
-         <div className="flex gap-3">
-             <button onClick={() => setShowScoreboard(true)} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', border: '1px solid #60a5fa', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(59,130,246,0.3)' }}>📊 SCOREBOARD</button>
-             <button onClick={leaveGame} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', border: '1px solid #f87171', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(220,38,38,0.3)' }}>EXIT</button>
-             <div className="px-5 py-2 rounded-full font-bold text-sm"
+         <div className="flex gap-2 md:gap-3 pointer-events-auto">
+             <button onClick={() => setShowScoreboard(true)} className="px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', border: '1px solid #60a5fa', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(59,130,246,0.3)' }}>📊 <span className="hidden md:inline">SCORE</span></button>
+             <button onClick={leaveGame} className="px-3 py-1 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-bold" style={{ background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', border: '1px solid #f87171', fontFamily: 'Orbitron, monospace', boxShadow: '0 4px 15px rgba(220,38,38,0.3)' }}>EXIT</button>
+             <div className="px-3 py-1 md:px-5 md:py-2 rounded-full font-bold text-xs md:text-sm"
                style={{ fontFamily: 'Orbitron, monospace', background: isMyTurn ? 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)' : 'rgba(30,41,59,0.8)', color: isMyTurn ? '#7c2d12' : '#cbd5e1', border: isMyTurn ? '1px solid #fcd34d' : '1px solid rgba(71,85,105,0.3)', boxShadow: isMyTurn ? '0 0 20px rgba(251,191,36,0.5)' : 'none', animation: isMyTurn ? 'pulse 2s ease-in-out infinite' : 'none' }}>
                 {isMyTurn ? "YOUR TURN" : (gameState.players[gameState.turn] ? `${gameState.players[gameState.turn].name}...` : "Waiting...")}
              </div>
@@ -1194,8 +1196,9 @@ export default function App() {
 
       {/* Main Table */}
       <div className="absolute inset-0 flex items-center justify-center">
-         <div className="relative rounded-full"
-           style={{ width: '340px', height: '340px', background: 'radial-gradient(circle, #047857 0%, #065f46 70%, #064e3b 100%)', border: '20px solid #422006', boxShadow: `0 0 0 5px #78350f, inset 0 0 80px rgba(0,0,0,0.5), 0 30px 80px rgba(0,0,0,0.7)` }}>
+         {/* ✅ UI FIX: Responsive Table Size + Landscape fix */}
+         <div className="relative rounded-full transition-all duration-300 w-[85vw] h-[85vw] max-w-[340px] max-h-[340px] lg:w-[38rem] lg:h-[38rem] landscape:w-[55vh] landscape:h-[55vh] landscape:max-w-none"
+           style={{ background: 'radial-gradient(circle, #047857 0%, #065f46 70%, #064e3b 100%)', border: '20px solid #422006', boxShadow: `0 0 0 5px #78350f, inset 0 0 80px rgba(0,0,0,0.5), 0 30px 80px rgba(0,0,0,0.7)` }}>
             {/* Inner circle glow */}
             <div className="absolute inset-0 rounded-full opacity-30" style={{ boxShadow: 'inset 0 0 60px rgba(16,185,129,0.3)' }} />
 
@@ -1206,11 +1209,13 @@ export default function App() {
                const relativeIndex = (pIdx - myIdxSafe + 4) % 4;
 
                let posStyle: any = {};
+               
+               // ✅ UI FIX: Use % for played cards to prevent clustering on large tables
                const standardPos = [
-                  { bottom: '150px', left: '50%', transform: 'translateX(-50%)' }, 
-                  { right: '150px', top: '50%', transform: 'translateY(-50%)' },  
-                  { top: '150px', left: '50%', transform: 'translateX(-50%)' },   
-                  { left: '150px', top: '50%', transform: 'translateY(-50%)' }   
+                  { bottom: '32%', left: '50%', transform: 'translateX(-50%)' }, 
+                  { right: '32%', top: '50%', transform: 'translateY(-50%)' },  
+                  { top: '32%', left: '50%', transform: 'translateX(-50%)' },   
+                  { left: '32%', top: '50%', transform: 'translateY(-50%)' }    
                ][relativeIndex];
 
                if (!standardPos) posStyle = {}; 
@@ -1307,19 +1312,28 @@ export default function App() {
          </div>
       )}
 
-      {/* PLAYER HAND */}
+      {/* PLAYER HAND - Fixed for 13 Cards */}
       {!isDealing && me && (
-        <div className="absolute bottom-6 left-0 right-0 flex justify-center z-30">
-            <div className="flex -space-x-8 hover:space-x-[-10px] transition-all px-4 pb-4">
-                {me.hand.map((card: any, i: number) => {
-                const isValid = validIndices.includes(i) && !isProcessing;
-                return (
-                    <div key={i} className="transition-all duration-300 origin-bottom"
-                      style={{ transform: isValid && isMyTurn ? 'translateY(0)' : 'translateY(0) scale(0.95)', filter: isValid && isMyTurn ? 'brightness(1)' : 'brightness(0.6) saturate(0.7)', zIndex: isValid && isMyTurn ? 20 : 10 }}>
-                        <Card card={card} isPlayable={isValid && isMyTurn} onClick={() => isValid && isMyTurn && playCard(i)} />
-                    </div>
-                )
-                })}
+        <div className="absolute bottom-1 md:bottom-2 lg:bottom-8 left-0 right-0 flex justify-center z-30 px-2 pointer-events-none">
+            {/* Wrapper for hover interaction */}
+            <div className="flex justify-center items-end w-full max-w-5xl pointer-events-auto pb-safe">
+                 {/* ✅ UI FIX: Dynamic negative margins. 
+                     Mobile: -1.8rem to fit 13 cards. Desktop: -3.5rem to spread out. */}
+                 <div className="flex -space-x-[1.8rem] md:-space-x-[2.5rem] lg:-space-x-[3.5rem] hover:space-x-[-1.5rem] lg:hover:space-x-[-2rem] transition-all duration-300 px-4 pb-2">
+                    {me.hand.map((card: any, i: number) => {
+                    const isValid = validIndices.includes(i) && !isProcessing;
+                    return (
+                        <div key={i} className="transition-all duration-200 origin-bottom cursor-pointer hover:-translate-y-6 hover:z-50 hover:scale-110"
+                          style={{ 
+                              transform: isValid && isMyTurn ? 'translateY(0)' : 'translateY(0) scale(0.95)', 
+                              filter: isValid && isMyTurn ? 'brightness(1)' : 'brightness(0.6) saturate(0.7)', 
+                              zIndex: isValid && isMyTurn ? 20 : 10 
+                          }}>
+                            <Card card={card} isPlayable={isValid && isMyTurn} onClick={() => isValid && isMyTurn && playCard(i)} />
+                        </div>
+                    )
+                    })}
+                </div>
             </div>
         </div>
       )}
