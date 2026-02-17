@@ -63,6 +63,7 @@ class Web3Service {
         }
         
         this.provider = new ethers.BrowserProvider(window.ethereum);
+        this.provider.pollingInterval = 25000;
         
         // CRITICAL: Ensure Base Mainnet before anything else
         await this.ensureNetwork();
