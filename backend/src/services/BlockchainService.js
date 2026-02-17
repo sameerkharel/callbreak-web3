@@ -1,6 +1,14 @@
 // ============================================
 // BlockchainService.js - PRODUCTION READY
-// Base Mainnet Only | All Compatibility Fixes Applied
+// Base Mainnet Only | Sniper+ Polling System
+// ============================================
+// CHANGES FROM ORIGINAL:
+//   1. Replaced setInterval(3s) with Sniper+ loop (30s coma / 3s active)
+//   2. Removed startLobbyHeartbeat() setInterval — integrated into main loop
+//   3. Added triggerSniperMode() — called by server.js socket handler
+//   4. Added wakeUpIfActiveGamesExist() — startup recovery after server restart
+//   5. Poll loop NEVER dies silently (try/catch guarantees next run)
+//   6. Immediate poll fired when sniper is triggered
 // ============================================
 
 const { ethers } = require("ethers");
@@ -72,7 +80,7 @@ class BlockchainService {
             this.signer
         );
 
-        // State management
+        // Core state
         this.gameManager = null;
         this.lastProcessedBlock = 0; 
         this.isPolling = false;      
@@ -81,41 +89,38 @@ class BlockchainService {
         
         // Secret storage (for commit-reveal scheme)
         this.pendingSecrets = new Map();
+
+        // ============================================
+        // SNIPER+ STATE (replaces raw setInterval)
+        // ============================================
+        this.isSniperActive = false;    // true = 3s polling, false = 30s polling
+        this.sniperTimeout = null;       // handle for the auto-sleep timer
+        this.pollLoopRunning = false;    // guard against double-start
+        this._lastLobbyUpdate = 0;       // tracks when lobby was last synced
         
-        // Network validation (must be done before use)
-        this.validateNetwork();
+        this.COMA_INTERVAL   = 30000;   // 30s — safe floor for a money game
+        this.SNIPER_INTERVAL = 3000;    // 3s  — active during blockchain actions
+        this.SNIPER_DURATION = 120000;  // 2min — how long sniper stays hot per trigger
     }
 
     // ============================================
     // NETWORK VALIDATION
     // ============================================
 
-    /**
-     * Validate we're connected to Base Mainnet
-     * Exits process if wrong network
-     */
     async validateNetwork() {
         try {
             const network = await this.provider.getNetwork();
             this.chainId = Number(network.chainId);
             
-            // STRICT: Only Base Mainnet allowed (8453)
             if (this.chainId !== BASE_MAINNET.chainId) {
                 const errorMsg = 
                     `\n❌ CRITICAL: WRONG NETWORK DETECTED!\n` +
-                    `\n` +
-                    `Expected: ${BASE_MAINNET.name} (Chain ID: ${BASE_MAINNET.chainId})\n` +
+                    `\nExpected: ${BASE_MAINNET.name} (Chain ID: ${BASE_MAINNET.chainId})\n` +
                     `Current:  Chain ID ${this.chainId}\n` +
-                    `\n` +
-                    `ACTION REQUIRED:\n` +
-                    `1. Check your RPC_URL in .env file\n` +
-                    `2. Ensure you're connecting to Base Mainnet\n` +
-                    `3. Restart the server after fixing\n` +
-                    `\n` +
-                    `Shutting down to prevent invalid transactions...\n`;
+                    `\nCheck RPC_URL in .env and restart.\n`;
                 
                 console.error(errorMsg);
-                process.exit(1); // Exit immediately
+                process.exit(1);
             }
             
             console.log(`✅ Network Validation: ${BASE_MAINNET.name} (Chain ID: ${this.chainId})`);
@@ -123,14 +128,10 @@ class BlockchainService {
             
         } catch (err) {
             console.error("❌ Network Validation Failed:", err.message);
-            console.error("Unable to connect to blockchain. Check your RPC_URL.");
             throw err;
         }
     }
 
-    /**
-     * Switch to backup RPC if primary fails
-     */
     async switchToBackupRpc() {
         console.warn("⚠️ Primary RPC failed. Switching to backup...");
         
@@ -164,13 +165,9 @@ class BlockchainService {
         this.gameManager = gameManager;
         
         try {
-            // Validate network first (critical)
             await this.validateNetwork();
-            
-            // Get starting block
             this.lastProcessedBlock = await this.provider.getBlockNumber();
             
-            // Display startup banner
             console.log("\n========================================");
             console.log("🛡️  BLOCKCHAIN SERVICE: INITIALIZED");
             console.log("========================================");
@@ -180,20 +177,153 @@ class BlockchainService {
             console.log(`👛  Server Address: ${this.wallet.address}`);
             console.log(`📝  Contract: ${process.env.CONTRACT_ADDRESS}`);
             console.log(`📦  Starting Block: ${this.lastProcessedBlock}`);
+            console.log(`🎯  Sniper+ Polling: COMA=${this.COMA_INTERVAL/1000}s / ACTIVE=${this.SNIPER_INTERVAL/1000}s`);
             console.log("========================================\n");
+
+            // ✅ FIX: Check DB for active games — wake up if they exist
+            // This handles the Railway/Render free-tier restart problem
+            await this.wakeUpIfActiveGamesExist();
+
+            // ✅ Start the Sniper+ polling loop (replaces setInterval)
+            this.startSniperLoop();
             
-            // Start event polling (every 3 seconds)
-            setInterval(() => this.robustPoll(), 3000);
-            
-            // Start lobby heartbeat (every 10 seconds)
-            this.startLobbyHeartbeat();
-            
-            // Start health monitoring (every minute)
+            // ✅ Start health monitoring (unchanged from original)
             this.monitorNetworkHealth();
 
         } catch (err) {
             console.error("❌ Failed to initialize Blockchain Service:", err.message);
-            process.exit(1); // Exit if initialization fails
+            process.exit(1);
+        }
+    }
+
+    // ============================================
+    // SNIPER+ POLLING SYSTEM
+    // ============================================
+
+    /**
+     * The main poll loop. Runs forever.
+     * Speed: 3s when sniper is ON, 30s when sniper is OFF.
+     * NEVER dies silently — try/catch guarantees the next setTimeout always fires.
+     */
+    startSniperLoop() {
+        if (this.pollLoopRunning) return; // Prevent accidental double-start
+        this.pollLoopRunning = true;
+
+        const loop = async () => {
+            const interval = this.isSniperActive 
+                ? this.SNIPER_INTERVAL 
+                : this.COMA_INTERVAL;
+
+            try {
+                if (this.isSniperActive) {
+                    console.log(`🔫 [Sniper] Polling block...`);
+                } else {
+                    console.log(`💤 [Coma] Polling block... (next: ${interval/1000}s)`);
+                }
+
+                await this.robustPoll();
+
+                // Lobby sync integrated here — no separate setInterval needed
+                await this.syncLobbyIfNeeded();
+
+            } catch (err) {
+                // ✅ KEY FIX: Log but NEVER let this kill the loop
+                console.error(`⚠️ Poll loop error (will retry in ${interval/1000}s):`, err.message);
+            }
+
+            // ✅ Always schedule next run, even after errors
+            setTimeout(loop, interval);
+        };
+
+        // Kick it off immediately
+        loop();
+    }
+
+    /**
+     * Called from server.js whenever the frontend fires a blockchain transaction.
+     * Wakes up the poll loop to 3s speed for SNIPER_DURATION ms.
+     * Calling it again while active resets the timer (extends the hot window).
+     *
+     * @param {string} reason - Label for logging (e.g. 'JOIN_QUEUE', 'SUBMIT_RESULT')
+     */
+    triggerSniperMode(reason = 'Unknown') {
+        if (this.isSniperActive) {
+            // Already hot — just extend the timer
+            console.log(`🔄 [Sniper] Extended by: ${reason}`);
+        } else {
+            console.log(`🎯 [Sniper] ACTIVATED by: ${reason} → switching to 3s polling`);
+            this.isSniperActive = true;
+        }
+
+        // Reset the auto-sleep countdown
+        if (this.sniperTimeout) clearTimeout(this.sniperTimeout);
+        this.sniperTimeout = setTimeout(() => {
+            console.log(`💤 [Sniper] Deactivated → returning to Coma (${this.COMA_INTERVAL/1000}s)`);
+            this.isSniperActive = false;
+        }, this.SNIPER_DURATION);
+
+        // ✅ Fire an IMMEDIATE poll so user doesn't wait for next scheduled run
+        this.robustPoll().catch(e =>
+            console.error("[Sniper] Immediate poll error:", e.message)
+        );
+    }
+
+    /**
+     * On server start, check if any active games exist in DB.
+     * If yes, activate sniper immediately so no game is left in coma.
+     * This solves the Railway/Render free-tier restart problem.
+     */
+    async wakeUpIfActiveGamesExist() {
+        try {
+            // Lazy-require to avoid circular dependency issues
+            const Game = require('../models/Game');
+            const activeCount = await Game.countDocuments({ 
+                status: { $in: ['WAITING', 'ACTIVE', 'GAME_OVER'] } 
+            });
+            
+            if (activeCount > 0) {
+                console.log(`⚡ [Startup] Found ${activeCount} active game(s) — activating Sniper immediately!`);
+                this.triggerSniperMode('StartupRecovery');
+            } else {
+                console.log(`💤 [Startup] No active games — starting in Coma Mode (${this.COMA_INTERVAL/1000}s)`);
+            }
+        } catch (err) {
+            // DB not ready yet, or model not found — default to sniper for safety
+            console.warn(`⚠️ [Startup] DB check failed (${err.message}) — starting in Sniper mode for safety`);
+            this.triggerSniperMode('StartupSafety');
+        }
+    }
+
+    /**
+     * Lobby sync — runs at most once every ~30s, integrated into the poll loop.
+     * Replaces the old startLobbyHeartbeat() setInterval.
+     * Only queries the contract if players are actually watching the lobby.
+     */
+    async syncLobbyIfNeeded() {
+        if (!this.gameManager) return;
+
+        // Throttle: only run every 30s regardless of sniper mode
+        const now = Date.now();
+        if (now - this._lastLobbyUpdate < 28000) return;
+        this._lastLobbyUpdate = now;
+
+        for (let tier = 0; tier <= 3; tier++) {
+            try {
+                // Only query contract if someone is watching this lobby
+                const room = this.gameManager.io.sockets.adapter.rooms
+                    .get(`TIER_${tier}_LOBBY`);
+
+                if (!room || room.size === 0) continue;
+
+                const queueMembers = await this.contract.getQueueMembers(tier);
+                this.gameManager.io.to(`TIER_${tier}_LOBBY`).emit('LOBBY_SYNC', {
+                    count: queueMembers.length,
+                    players: queueMembers,
+                    timestamp: Date.now()
+                });
+            } catch (e) {
+                // Silent fail — non-critical, next sync will retry
+            }
         }
     }
 
@@ -201,14 +331,9 @@ class BlockchainService {
     // SECRET MANAGEMENT (Commit-Reveal Scheme)
     // ============================================
 
-    /**
-     * Register a secret for later reveal
-     * Secrets are auto-cleaned after 15 minutes
-     */
     registerSecret(serverHash, secret) {
         this.pendingSecrets.set(serverHash, secret);
         
-        // Auto-cleanup after 15 minutes
         setTimeout(() => {
             if (this.pendingSecrets.has(serverHash)) {
                 console.log(`🧹 Cleaning up expired secret: ${serverHash.slice(0, 10)}...`);
@@ -220,19 +345,16 @@ class BlockchainService {
     }
 
     // ============================================
-    // EVENT POLLING (Robust with Error Handling)
+    // EVENT POLLING (Unchanged — only call-site changed)
     // ============================================
 
     async robustPoll() {
-        // Prevent concurrent polling
         if (this.isPolling) return;
         this.isPolling = true;
 
         try {
-            // Get current block
             const currentBlock = await this.provider.getBlockNumber();
             
-            // Skip if no new blocks
             if (currentBlock <= this.lastProcessedBlock) {
                 this.isPolling = false;
                 return;
@@ -308,7 +430,6 @@ class BlockchainService {
                     console.log(`✅ FinalStateSubmitted: ${gameId}`);
                     console.log(`   Winner: ${winner}`);
                     
-                    // Get submitter from transaction
                     const tx = await event.getTransaction();
                     const submitter = tx.from;
                     
@@ -325,14 +446,12 @@ class BlockchainService {
             // ============================================
             this.pollQueueEvents(fromBlock, toBlock);
 
-            // Update last processed block
             this.lastProcessedBlock = currentBlock;
             this.isHealthy = true;
 
         } catch (err) {
             console.error("⚠️ Polling Error:", err.message);
             
-            // Try backup RPC if primary fails repeatedly
             if (err.message.includes('connection') || err.message.includes('timeout')) {
                 await this.switchToBackupRpc().catch(() => {
                     console.error("❌ Both RPC endpoints failed");
@@ -345,35 +464,26 @@ class BlockchainService {
         }
     }
 
-    /**
-     * Handle GameReadyToStart event
-     * Waits for reveal block, then reveals secret
-     */
     async handleGameReady(gameId, targetBlock) {
         try {
-            // Get game data from contract
             const core = await this.contract.gameCores(gameId);
             const serverHash = core.serverCommitHash;
             
-            // Retrieve secret
             const secret = this.pendingSecrets.get(serverHash);
             
             if (!secret) {
                 console.error(`❌ CRITICAL: No secret found for Game ${gameId}!`);
                 console.error(`   Server Hash: ${serverHash}`);
-                console.error(`   Cannot reveal game. Players will need emergency withdraw.`);
+                console.error(`   Players will need emergency withdraw.`);
                 return;
             }
 
-            // Initialize game in memory if needed
             if (this.gameManager && !this.gameManager.games[gameId]) {
                 console.log(`📥 Initializing memory for Game ${gameId}`);
                 
                 const game = this.gameManager.createWeb3Game(gameId, secret);
-                
-                // Get players from contract
                 const gameInfo = await this.contract.getGameInfo(gameId);
-                const players = gameInfo[1]; // address[4] players
+                const players = gameInfo[1];
                 
                 const validPlayerIds = [];
                 for (let i = 0; i < 4; i++) {
@@ -384,7 +494,6 @@ class BlockchainService {
                     }
                 }
 
-                // Force socket connections
                 if (this.gameManager.forceJoinSockets) {
                     this.gameManager.forceJoinSockets(gameId, validPlayerIds);
                 }
@@ -392,19 +501,16 @@ class BlockchainService {
                 this.gameManager.broadcastGameState(gameId);
             }
 
-            // Wait for reveal block
             let current = await this.provider.getBlockNumber();
             while (current <= targetBlock) {
                 console.log(`⏳ Waiting for block ${targetBlock + 1} (Current: ${current})...`);
-                await new Promise(r => setTimeout(r, 2000)); // Wait 2 seconds
+                await new Promise(r => setTimeout(r, 2000));
                 current = await this.provider.getBlockNumber();
             }
 
-            // Reveal game
             console.log(`🔓 Revealing Game ${gameId}...`);
             await this.revealAndStartGame(gameId, secret);
             
-            // Cleanup secret
             this.pendingSecrets.delete(serverHash);
             console.log(`✅ Secret revealed and cleaned up for ${gameId}`);
 
@@ -413,18 +519,13 @@ class BlockchainService {
         }
     }
 
-    /**
-     * Poll queue events for lobby updates
-     */
     pollQueueEvents(from, to) {
         if (!this.gameManager) return;
         
-        // QueueEntered event
         this.contract.queryFilter("QueueEntered", from, to)
             .then(events => {
                 for (const e of events) {
                     const { player, tier, currentQueueLength } = e.args;
-                    
                     this.gameManager.io.to(`TIER_${tier}_LOBBY`).emit('LOBBY_UPDATE', {
                         type: 'PLAYER_JOINED', 
                         player, 
@@ -432,65 +533,34 @@ class BlockchainService {
                     });
                 }
             })
-            .catch(() => {}); // Silently ignore errors
+            .catch(() => {});
 
-        // QueueLeft event
         this.contract.queryFilter("QueueLeft", from, to)
             .then(events => {
                 for (const e of events) {
                     const { player, tier } = e.args;
-                    
                     this.gameManager.io.to(`TIER_${tier}_LOBBY`).emit('LOBBY_UPDATE', {
                         type: 'PLAYER_LEFT', 
                         player
                     });
                 }
             })
-            .catch(() => {}); // Silently ignore errors
-    }
-
-    /**
-     * Send periodic lobby sync updates
-     */
-    startLobbyHeartbeat() {
-        setInterval(async () => {
-            if (!this.gameManager) return;
-            
-            for (let tier = 0; tier <= 3; tier++) {
-                try {
-                    const queueMembers = await this.contract.getQueueMembers(tier);
-                    
-                    this.gameManager.io.to(`TIER_${tier}_LOBBY`).emit('LOBBY_SYNC', {
-                        count: queueMembers.length,
-                        players: queueMembers,
-                        timestamp: Date.now()
-                    });
-                } catch (e) {
-                    // Silently ignore - next heartbeat will retry
-                }
-            }
-        }, 10000); // Every 10 seconds
+            .catch(() => {});
     }
 
     // ============================================
-    // EIP-712 SIGNING (Deterministic Signatures)
+    // EIP-712 SIGNING (Unchanged)
     // ============================================
 
-    /**
-     * Get EIP-712 Domain - Base Mainnet Only
-     */
     getDomain() {
         return { 
             name: "CallBreak_V3", 
             version: "1", 
-            chainId: BASE_MAINNET.chainId, // Hardcoded: 8453
+            chainId: BASE_MAINNET.chainId,
             verifyingContract: process.env.CONTRACT_ADDRESS 
         };
     }
 
-    /**
-     * Sign Join Request (for joinAndStartGame)
-     */
     async signJoinRequest(tier, playerAddress, nonce, expiryBlock, serverHash) {
         const types = { 
             Join: [
@@ -520,15 +590,7 @@ class BlockchainService {
         return signature;
     }
 
-    /**
-     * Sign Final Result (CRITICAL FIX - Proper Score Hashing)
-     */
     async signFinalResult(gameId, randomSeed, transcriptHash, scores, winner, expiryTimestamp) {
-        // ============================================
-        // CRITICAL FIX: Validate and hash scores correctly
-        // ============================================
-        
-        // 1. Ensure scores are integers (no decimals)
         const intScores = scores.map((s, i) => {
             const rounded = Math.floor(Number(s));
             if (isNaN(rounded)) {
@@ -542,8 +604,6 @@ class BlockchainService {
         console.log(`   Winner: ${winner}`);
         console.log(`   Scores (validated): ${JSON.stringify(intScores)}`);
         
-        // 2. Hash scores exactly as Solidity does
-        // Solidity: keccak256(abi.encodePacked(int256[]))
         const scoresHash = ethers.keccak256(
             ethers.solidityPacked(
                 ["int256", "int256", "int256", "int256"], 
@@ -553,13 +613,12 @@ class BlockchainService {
         
         console.log(`   Scores Hash: ${scoresHash}`);
         
-        // 3. Create EIP-712 signature
         const types = { 
             FinalState: [
                 { name: "gameId", type: "bytes32" },
                 { name: "randomSeed", type: "uint256" },
                 { name: "transcriptHash", type: "bytes32" },
-                { name: "scoresHash", type: "bytes32" }, // Note: Hash, not array
+                { name: "scoresHash", type: "bytes32" },
                 { name: "winner", type: "address" },
                 { name: "expiryTimestamp", type: "uint256" }
             ] 
@@ -569,7 +628,7 @@ class BlockchainService {
             gameId, 
             randomSeed: BigInt(randomSeed), 
             transcriptHash, 
-            scoresHash, // Use the hash
+            scoresHash,
             winner, 
             expiryTimestamp: BigInt(expiryTimestamp) 
         };
@@ -583,52 +642,41 @@ class BlockchainService {
     }
 
     // ============================================
-    // CONTRACT INTERACTIONS
+    // CONTRACT INTERACTIONS (Unchanged)
     // ============================================
 
-    /**
-     * Reveal and start game (called by server)
-     */
     async revealAndStartGame(gameId, secret) {
         try {
             console.log(`🔓 Revealing Game ${gameId}...`);
             
-            // Send transaction
             const tx = await this.contract.revealAndStart(gameId, secret);
             console.log(`📤 Reveal TX Sent: ${tx.hash}`);
             
-            // Wait for confirmation
             const receipt = await tx.wait(1);
             
             if (receipt.status === 0) {
                 throw new Error("Transaction reverted");
             }
             
-            console.log(`✅ Game ${gameId} revealed successfully at block ${receipt.blockNumber}`);
+            console.log(`✅ Game ${gameId} revealed at block ${receipt.blockNumber}`);
             return true;
             
         } catch (error) {
             console.error(`❌ Failed to reveal game ${gameId}:`, error.message);
-            
             if (error.message?.includes('Commit Mismatch')) {
                 console.error(`   Secret does not match server hash!`);
             }
-            
             throw error;
         }
     }
 
     // ============================================
-    // HEALTH MONITORING
+    // HEALTH MONITORING (Unchanged)
     // ============================================
 
-    /**
-     * Monitor network health and server bond
-     */
     async monitorNetworkHealth() {
         setInterval(async () => {
             try {
-                // Check network ID
                 const network = await this.provider.getNetwork();
                 if (Number(network.chainId) !== BASE_MAINNET.chainId) {
                     console.error("❌ CRITICAL: Not on Base Mainnet!");
@@ -637,7 +685,6 @@ class BlockchainService {
                     return;
                 }
                 
-                // Check RPC responsiveness
                 const startTime = Date.now();
                 await this.provider.getBlockNumber();
                 const latency = Date.now() - startTime;
@@ -646,12 +693,10 @@ class BlockchainService {
                     console.warn(`⚠️ High RPC latency: ${latency}ms`);
                 }
                 
-                // Check server bond levels
                 const bond = await this.contract.serverBond();
                 const locked = await this.contract.lockedBond();
                 const available = bond - locked;
                 
-                // Alert if low (less than 0.5 ETH available)
                 if (available < ethers.parseEther("0.5")) {
                     console.warn(`⚠️ Low Server Bond!`);
                     console.warn(`   Total: ${ethers.formatEther(bond)} ETH`);
@@ -660,63 +705,47 @@ class BlockchainService {
                     this.alertAdmin(`Low server bond: ${ethers.formatEther(available)} ETH available`);
                 }
                 
-                // Mark as healthy if all checks pass
                 this.isHealthy = true;
                 
             } catch (error) {
                 console.error("❌ Health check failed:", error.message);
                 this.isHealthy = false;
             }
-        }, 60000); // Every minute
+        }, 60000);
     }
 
-    /**
-     * Alert admin (implement your notification system here)
-     */
     alertAdmin(message) {
         console.log(`\n🚨 ========================================`);
         console.log(`🚨 ADMIN ALERT: ${message}`);
         console.log(`🚨 Time: ${new Date().toISOString()}`);
         console.log(`🚨 ========================================\n`);
         
-        // TODO: Implement actual alerting
-        // Examples:
-        // - Send Discord webhook
-        // - Send Telegram message
-        // - Send email via SendGrid
-        // - Log to Sentry
-        
-        // Example Discord webhook:
+        // TODO: Wire up your notification channel here
+        // Discord webhook example:
         // if (process.env.DISCORD_WEBHOOK) {
         //     fetch(process.env.DISCORD_WEBHOOK, {
         //         method: 'POST',
         //         headers: { 'Content-Type': 'application/json' },
         //         body: JSON.stringify({
-        //             content: `🚨 **CallBreak Alert**\n${message}\nTime: ${new Date().toISOString()}`
+        //             content: `🚨 **CallBreak Alert**\n${message}\n${new Date().toISOString()}`
         //         })
-        //     }).catch(e => console.error("Failed to send Discord alert:", e));
+        //     }).catch(e => console.error("Discord alert failed:", e));
         // }
     }
 
     // ============================================
-    // UTILITY FUNCTIONS
+    // UTILITY (Unchanged)
     // ============================================
 
-    /**
-     * Get current block number
-     */
     async getCurrentBlock() {
         try {
             return await this.provider.getBlockNumber();
         } catch (error) {
             console.error("Error getting block number:", error.message);
-            return this.lastProcessedBlock; // Return last known block
+            return this.lastProcessedBlock;
         }
     }
 
-    /**
-     * Get service health status
-     */
     getHealthStatus() {
         return {
             isHealthy: this.isHealthy,
@@ -724,7 +753,10 @@ class BlockchainService {
             network: BASE_MAINNET.name,
             lastProcessedBlock: this.lastProcessedBlock,
             serverAddress: this.wallet.address,
-            contractAddress: process.env.CONTRACT_ADDRESS
+            contractAddress: process.env.CONTRACT_ADDRESS,
+            // Bonus: expose sniper state for debugging
+            sniperActive: this.isSniperActive,
+            pollMode: this.isSniperActive ? `Sniper (${this.SNIPER_INTERVAL/1000}s)` : `Coma (${this.COMA_INTERVAL/1000}s)`
         };
     }
 }
