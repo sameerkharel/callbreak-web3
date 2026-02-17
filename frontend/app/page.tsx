@@ -19,6 +19,18 @@ const socket = io(SOCKET_URL, { transports: ['websocket'] });
 
 type MenuState = 'MAIN' | 'PLAY_MODES' | 'CASINO' | 'TUTORIAL';
 
+// ============================================================
+// [SNIPER+] Helper: Notify backend before any blockchain TX
+// Wakes backend from 30s Coma → 3s Sniper polling mode.
+// Call this BEFORE every Web3 transaction.
+// ============================================================
+const triggerSniperMode = (action: string) => {
+    if (socket && socket.connected) {
+        socket.emit('WE_MADE_A_MOVE', { action });
+        console.log(`🔫 [Sniper] Trigger sent: ${action}`);
+    }
+};
+
 export default function App() {
   // Initialize UI System
   const ui = useUI();
@@ -395,6 +407,9 @@ export default function App() {
              if (profile) setUserProfile(profile);
           }
 
+          // [SNIPER+] Wake backend before sending the join transaction
+          triggerSniperMode('JOIN_QUEUE');
+
           await Web3Service.joinGame(tierIndex);
           
           const matchRoomId = `TIER_${tierIndex}_LOBBY`; 
@@ -465,6 +480,9 @@ export default function App() {
             ...gameResultData, 
             scores: gameResultData.scores.map((s: any) => (Number(s) / 10).toString()) 
         };
+
+        // [SNIPER+] Wake backend before sending the submit transaction
+        triggerSniperMode('SUBMIT_RESULT');
 
         await Web3Service.submitResult(gameState.roomId, payload);
         
@@ -622,6 +640,10 @@ export default function App() {
 
           try {
               setWeb3Status("Processing Refund...");
+
+              // [SNIPER+] Wake backend before sending the leaveQueue transaction
+              triggerSniperMode('LEAVE_QUEUE');
+
               await Web3Service.leaveQueue(); 
               
               setWeb3Status("Verifying Refund...");
@@ -729,6 +751,8 @@ export default function App() {
                         <button onClick={async () => {
                                 try {
                                     setWeb3Status("Attempting Emergency Withdraw...");
+                                    // [SNIPER+] Wake backend before emergency withdraw transaction
+                                    triggerSniperMode('EMERGENCY_WITHDRAW');
                                     await Web3Service.emergencyWithdraw(zombieData.gameId);
                                     ui.showSuccess("Success", "Funds recovered successfully.");
                                     setIsZombieState(false);
