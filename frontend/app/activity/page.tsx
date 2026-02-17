@@ -3,6 +3,17 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Web3Service from '@/services/Web3Service';
 import { useUI } from '@/context/UIContext';
+import { io } from 'socket.io-client';
+
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const _activitySocket = io(SOCKET_URL, { transports: ['websocket'] });
+
+const triggerSniperMode = (action: string) => {
+    if (_activitySocket && _activitySocket.connected) {
+        _activitySocket.emit('WE_MADE_A_MOVE', { action });
+        console.log(`🔫 [Sniper] Trigger sent: ${action}`);
+    }
+};
 
 export default function ActivityPage() {
     const ui = useUI();
@@ -111,6 +122,7 @@ export default function ActivityPage() {
             // This ensures Web3Service receives what it expects
             payload.scores = game.result.scores.map((s: any) => (Number(s) / 10).toString());
 
+            triggerSniperMode('SUBMIT_RESULT');
             await Web3Service.submitResult(game.roomId, payload);
             
             ui.showSuccess("Success!", "Result submitted to blockchain! Wait 5 minutes to claim.");
@@ -130,6 +142,7 @@ export default function ActivityPage() {
     const handleFinalize = async (gameId: string, type: 'CLAIM' | 'UNLOCK') => {
         setActionId(gameId);
         try {
+            triggerSniperMode('FINALIZE_GAME');
             await Web3Service.finalizeGame(gameId);
             if (type === 'CLAIM') {
                 ui.showSuccess("🎉 Success!", "Winnings transferred to your wallet!");
