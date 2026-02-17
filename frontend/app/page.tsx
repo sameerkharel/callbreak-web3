@@ -813,8 +813,8 @@ export default function App() {
           <button onClick={async () => {
                   try {
                       setWeb3Status("Withdrawing from Vault...");
-                      await Web3Service.withdrawPendingFunds();
                       triggerSniperMode('WITHDRAW_PENDING');
+                      await Web3Service.withdrawPendingFunds();
                       ui.showSuccess("Funds Withdrawn", "Your funds have been successfully withdrawn.");
                       setHasPendingFunds(false);
                   } catch(e: any) { ui.showError("Withdraw Failed", e.message); } 
