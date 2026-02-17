@@ -9,6 +9,9 @@
 //   4. Added wakeUpIfActiveGamesExist() — startup recovery after server restart
 //   5. Poll loop NEVER dies silently (try/catch guarantees next run)
 //   6. Immediate poll fired when sniper is triggered
+//   7. [NEW] fallbackRpcUrl hardcoded as Ankr (no .env key needed)
+//   8. [NEW] robustPoll catches rate limit errors (429) → triggers switchToBackupRpc
+//   9. [NEW] monitorNetworkHealth auto-recovers back to primary every 5 mins
 // ============================================
 
 const { ethers } = require("ethers");
@@ -42,9 +45,8 @@ const BASE_MAINNET = {
     chainIdHex: '0x2105',
     name: 'Base Mainnet',
     rpcUrls: {
-        primary: 'https://mainnet.base.org',
-        backup: 'https://base.llamarpc.com',
-        fallback: 'https://base-mainnet.public.blastapi.io'
+        primary: 'https://mainnet.base.org',  // Used if RPC_URL missing from .env
+        backup: 'https://base.llamarpc.com',   // Used if RPC_URL_BACKUP missing from .env
     }
 };
 
@@ -60,11 +62,15 @@ class BlockchainService {
         }
         
         // RPC Configuration with fallbacks
-        this.rpcUrl = process.env.RPC_URL || BASE_MAINNET.rpcUrls.primary;
-        this.backupRpcUrl = process.env.RPC_URL_BACKUP || BASE_MAINNET.rpcUrls.backup;
+        this.rpcUrl         = process.env.RPC_URL        || BASE_MAINNET.rpcUrls.primary;
+        this.backupRpcUrl   = process.env.RPC_URL_BACKUP || BASE_MAINNET.rpcUrls.backup;
+        this.fallbackRpcUrl = 'https://rpc.ankr.com/base';
+        this.isOnBackup     = false;
+        this._lastRecoveryAttempt = 0;
         
         console.log(`🔗 Primary RPC: ${this.rpcUrl}`);
         console.log(`🔗 Backup RPC: ${this.backupRpcUrl}`);
+        console.log(`🔗 Fallback RPC: ${this.fallbackRpcUrl}`);
         
         // Initialize provider
         this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
@@ -133,25 +139,25 @@ class BlockchainService {
     }
 
     async switchToBackupRpc() {
-        console.warn("⚠️ Primary RPC failed. Switching to backup...");
+        const urlToTry = this.isOnBackup 
+            ? this.fallbackRpcUrl   // Already on backup, try fallback
+            : this.backupRpcUrl;    // First failure, try backup
+
+        console.warn(`⚠️ Switching RPC → ${urlToTry}`);
         
         try {
-            this.provider = new ethers.JsonRpcProvider(this.backupRpcUrl);
-            this.wallet = new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, this.provider);
-            this.signer = this.wallet;
-            
-            this.contract = new ethers.Contract(
-                process.env.CONTRACT_ADDRESS, 
-                ContractABI, 
-                this.signer
-            );
+            this.provider = new ethers.JsonRpcProvider(urlToTry);
+            this.wallet   = new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, this.provider);
+            this.signer   = this.wallet;
+            this.contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ContractABI, this.signer);
             
             await this.validateNetwork();
-            console.log("✅ Successfully switched to backup RPC");
+            this.isOnBackup = !this.isOnBackup;
+            console.log(`✅ Now using: ${urlToTry}`);
             this.isHealthy = true;
             
         } catch (error) {
-            console.error("❌ Backup RPC also failed:", error.message);
+            console.error("❌ RPC switch failed:", error.message);
             this.isHealthy = false;
             throw new Error("All RPC endpoints failed");
         }
@@ -187,7 +193,6 @@ class BlockchainService {
             // ✅ Start the Sniper+ polling loop (replaces setInterval)
             this.startSniperLoop();
             
-            // ✅ Start health monitoring (unchanged from original)
             this.monitorNetworkHealth();
 
         } catch (err) {
@@ -345,7 +350,7 @@ class BlockchainService {
     }
 
     // ============================================
-    // EVENT POLLING (Unchanged — only call-site changed)
+    // EVENT POLLING
     // ============================================
 
     async robustPoll() {
@@ -452,9 +457,19 @@ class BlockchainService {
         } catch (err) {
             console.error("⚠️ Polling Error:", err.message);
             
-            if (err.message.includes('connection') || err.message.includes('timeout')) {
+            // [FIX] Also catch rate limit errors (429) — Infura/QuickNode return these
+            // when monthly request limits are exceeded, not just connection errors
+            const shouldSwitch =
+                err.message.includes('connection')       ||
+                err.message.includes('timeout')          ||
+                err.message.includes('429')              ||
+                err.message.includes('rate limit')       ||
+                err.message.includes('request limit')    ||
+                err.message.includes('Too Many Requests');
+
+            if (shouldSwitch) {
                 await this.switchToBackupRpc().catch(() => {
-                    console.error("❌ Both RPC endpoints failed");
+                    console.error("❌ All RPC endpoints failed");
                     this.isHealthy = false;
                 });
             }
@@ -671,7 +686,7 @@ class BlockchainService {
     }
 
     // ============================================
-    // HEALTH MONITORING (Unchanged)
+    // HEALTH MONITORING
     // ============================================
 
     async monitorNetworkHealth() {
@@ -706,6 +721,30 @@ class BlockchainService {
                 }
                 
                 this.isHealthy = true;
+
+                // [NEW] Auto-recover back to primary if we switched to backup/fallback
+                // Tries every 5 minutes — if primary is back up, switch back
+                if (this.isOnBackup) {
+                    const now = Date.now();
+                    if (now - this._lastRecoveryAttempt > 300000) { // 5 minutes
+                        this._lastRecoveryAttempt = now;
+                        console.log("🔄 Attempting to recover back to primary RPC (Infura)...");
+                        try {
+                            const testProvider = new ethers.JsonRpcProvider(this.rpcUrl);
+                            await testProvider.getBlockNumber(); // Just test it responds
+                            
+                            // Primary is alive again — switch back
+                            this.provider = testProvider;
+                            this.wallet   = new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, this.provider);
+                            this.signer   = this.wallet;
+                            this.contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ContractABI, this.signer);
+                            this.isOnBackup = false;
+                            console.log(`✅ Recovered back to primary RPC: ${this.rpcUrl}`);
+                        } catch (e) {
+                            console.log(`⏳ Primary still unavailable, staying on backup (${e.message})`);
+                        }
+                    }
+                }
                 
             } catch (error) {
                 console.error("❌ Health check failed:", error.message);
@@ -754,9 +793,10 @@ class BlockchainService {
             lastProcessedBlock: this.lastProcessedBlock,
             serverAddress: this.wallet.address,
             contractAddress: process.env.CONTRACT_ADDRESS,
-            // Bonus: expose sniper state for debugging
             sniperActive: this.isSniperActive,
-            pollMode: this.isSniperActive ? `Sniper (${this.SNIPER_INTERVAL/1000}s)` : `Coma (${this.COMA_INTERVAL/1000}s)`
+            pollMode: this.isSniperActive ? `Sniper (${this.SNIPER_INTERVAL/1000}s)` : `Coma (${this.COMA_INTERVAL/1000}s)`,
+            // [NEW] Show which RPC tier we're currently on
+            rpcTier: this.isOnBackup ? 'backup/fallback' : 'primary'
         };
     }
 }
