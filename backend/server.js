@@ -1,3 +1,7 @@
+// ============================================
+// server.js - PRODUCTION READY
+// ============================================
+
 require('dotenv').config();
 const port = process.env.PORT || 5000;
 const express = require('express');
@@ -5,17 +9,15 @@ const http = require('http');
 const { Server } = require("socket.io");
 const cors = require('cors');
 const { ethers } = require("ethers");
-const connectDB = require('./src/config/db'); // mongodb
-const userRoutes = require('./src/routes/userRoutes'); // userroutes 
-const activityRoutes = require('./src/routes/activityRoutes'); // Activity Routes
+const connectDB = require('./src/config/db');
+const userRoutes = require('./src/routes/userRoutes');
+const activityRoutes = require('./src/routes/activityRoutes');
 
-// Custom Managers & Services
 const GameManager = require('./src/managers/GameManager');
 const BlockchainService = require('./src/services/BlockchainService');
 
 const app = express();
 
-// ✅ ENHANCEMENT: Better CORS configuration with specific options
 app.use(cors({
     origin: process.env.CLIENT_URL || '*',
     methods: ['GET', 'POST'],
@@ -24,7 +26,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// ✅ ENHANCEMENT: Add request logging middleware (useful for debugging)
 app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] ${req.method} ${req.path}`);
@@ -33,29 +34,25 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 
-// ✅ ENHANCEMENT: Better Socket.IO configuration
 const io = new Server(server, { 
     cors: { 
         origin: process.env.CLIENT_URL || "*",
         methods: ["GET", "POST"]
     },
-    pingTimeout: 60000, // 60s before considering connection dead
-    pingInterval: 25000  // Check connection every 25s
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 // --- INITIALIZATION ---
 
-// 1. Initialize Game Manager
 const gameManager = new GameManager(io);
 
-// 2. Initialize Blockchain Service (The Listener)
 if (process.env.SERVER_PRIVATE_KEY && process.env.CONTRACT_ADDRESS) {
     try {
         BlockchainService.initialize(gameManager);
         console.log("✅ Blockchain Service & Event Listeners Active");
     } catch (err) {
         console.error("⚠️ Failed to init Blockchain Service:", err.message);
-        // ✅ ENHANCEMENT: Log the full error in development
         if (process.env.NODE_ENV === 'development') {
             console.error(err);
         }
@@ -64,14 +61,11 @@ if (process.env.SERVER_PRIVATE_KEY && process.env.CONTRACT_ADDRESS) {
     console.warn("⚠️ WEB3 SKIPPED: Missing SERVER_PRIVATE_KEY or CONTRACT_ADDRESS in .env");
 }
 
-// 3. Temporary Storage (The Bridge)
-// Maps UserAddress -> Secret (Used to pass secret from API to Socket)
 const playerSecrets = new Map();
 
-// ✅ ENHANCEMENT: Auto-cleanup old secrets (prevent memory leak)
 setInterval(() => {
     const now = Date.now();
-    const TIMEOUT = 5 * 60 * 1000; // 5 minutes
+    const TIMEOUT = 5 * 60 * 1000;
     
     for (const [address, data] of playerSecrets.entries()) {
         if (data.timestamp && (now - data.timestamp > TIMEOUT)) {
@@ -79,43 +73,33 @@ setInterval(() => {
             console.log(`🧹 Cleaned up expired secret for ${address.slice(0, 6)}...`);
         }
     }
-}, 60000); // Run every minute
+}, 60000);
 
-// --- SECURITY: VALID LOBBIES ---
-// Prevents hackers from creating infinite trash rooms (DoS protection)
 const VALID_LOBBIES = new Set(['TIER_0_LOBBY', 'TIER_1_LOBBY', 'TIER_2_LOBBY']);
 
 
 // --- API ENDPOINTS ---
 
-// ✅ ENHANCEMENT: Health check endpoint (useful for monitoring)
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
         blockchain: !!BlockchainService.provider,
-        database: 'connected' // You could add actual DB health check
+        database: 'connected',
+        // [SNIPER+] Expose poll mode in health check (useful for debugging)
+        pollMode: BlockchainService.isSniperActive 
+            ? `Sniper (3s)` 
+            : `Coma (30s)`
     });
 });
 
 app.use('/api/user', userRoutes);
 app.use('/api/activity', activityRoutes);
 
-// ============================================
-// [NEW] Game Recovery Endpoint
-// ============================================
-/**
- * Returns completed game data for "Recovery Mode"
- * Use Case: User's blockchain state shows "PLAYING" but game is actually 
- * finished and signed. This happens when server crashes or loses socket 
- * connection after game ends. Instead of showing zombie state, we recover 
- * the result and let user submit it to unlock blockchain state.
- */
 app.get('/api/game-recovery/:gameId', async (req, res) => {
     try {
         const { gameId } = req.params;
         
-        // Validate gameId format
         if (!gameId || gameId.length < 5) {
             return res.status(400).json({ 
                 error: 'Invalid game ID format',
@@ -125,11 +109,7 @@ app.get('/api/game-recovery/:gameId', async (req, res) => {
         
         console.log(`🔍 Recovery request for game: ${gameId}`);
         
-        // ============================================
-        // OPTION A: Query from Database (Recommended)
-        // ============================================
-        
-        const Game = require('./src/models/Game'); // Adjust path as needed
+        const Game = require('./src/models/Game');
         
         const game = await Game.findOne({ 
             roomId: gameId,
@@ -144,7 +124,6 @@ app.get('/api/game-recovery/:gameId', async (req, res) => {
             });
         }
         
-        // Check if game has been signed by server
         if (!game.result || !game.result.signature) {
             console.log(`⚠️ Game ${gameId} finished but not yet signed`);
             return res.status(404).json({ 
@@ -153,7 +132,6 @@ app.get('/api/game-recovery/:gameId', async (req, res) => {
             });
         }
         
-        // Success - Return recovery data
         console.log(`✅ Sending recovery data for ${gameId}`);
         console.log(`   Winner: ${game.result.winner}`);
         
@@ -180,15 +158,11 @@ app.get('/api/game-recovery/:gameId', async (req, res) => {
     }
 });
 
-// Sign Join Request Endpoint
 app.post('/api/sign-join', async (req, res) => {
     try {
-        // 1. INPUT NORMALIZATION
         const tier = req.body.tier;
-        // Accept both naming conventions to be safe
         const userAddress = req.body.playerAddress || req.body.userAddress;
 
-        // 2. VALIDATION (Best of V1: Specific Error Codes)
         if (!userAddress) {
             return res.status(400).json({ 
                 error: "Missing player address", 
@@ -210,10 +184,8 @@ app.post('/api/sign-join', async (req, res) => {
             });
         }
 
-        // 3. RATE LIMITING 
-        // Check this early to save resources
         const lastRequest = playerSecrets.get(userAddress);
-        if (lastRequest && (Date.now() - lastRequest.timestamp < 10000)) { // 10s cooldown
+        if (lastRequest && (Date.now() - lastRequest.timestamp < 10000)) {
             console.warn(`⚠️ Rate limit hit for ${userAddress}`);
             return res.status(429).json({ 
                 error: "Too many requests. Please wait 10 seconds.", 
@@ -221,8 +193,6 @@ app.post('/api/sign-join', async (req, res) => {
             });
         }
 
-        // 4. INFRASTRUCTURE CHECK (Best of V1: Stability)
-        // Ensure the blockchain connection is actually alive before proceeding
         if (!BlockchainService.provider || !BlockchainService.signer) {
             console.error("❌ Blockchain Service Unavailable");
             return res.status(503).json({ 
@@ -231,18 +201,15 @@ app.post('/api/sign-join', async (req, res) => {
             });
         }
 
-        // Logging (Best of V1: Observability)
         console.log(`📝 Sign Request: Tier ${tier} for ${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`);
 
-        // 5. CORE LOGIC
         const secret = ethers.hexlify(ethers.randomBytes(32)); 
         const serverHash = ethers.keccak256(secret);
         
         const nonce = Date.now(); 
         const currentBlock = await BlockchainService.provider.getBlockNumber();
-        const expiryBlock = currentBlock + 50; // Valid for ~10-15 mins
+        const expiryBlock = currentBlock + 50;
 
-        // 6. CRYPTOGRAPHIC SIGNATURE
         const signature = await BlockchainService.signJoinRequest(
             tier, 
             userAddress, 
@@ -251,19 +218,15 @@ app.post('/api/sign-join', async (req, res) => {
             serverHash
         );
 
-        // 7. STATE MANAGEMENT (Best of V2: Rich Data)
         BlockchainService.registerSecret(serverHash, secret);
 
-        // Store extended data so you can run cleanup jobs later based on expiryBlock
         playerSecrets.set(userAddress, {
             secret,
             timestamp: Date.now(),
-            expiryBlock, // Useful for server-side cleanup logic
-            tier         // Useful for analytics
+            expiryBlock,
+            tier
         });
 
-        // 8. RESPONSE (Best of V2: Context aware)
-        // Including 'currentBlock' allows the frontend to show accurate countdowns
         res.json({
             success: true,
             serverHash,
@@ -277,14 +240,10 @@ app.post('/api/sign-join', async (req, res) => {
         console.log(`✅ Signed for ${userAddress.slice(0, 6)}... (Expires: ${expiryBlock})`);
 
     } catch (e) {
-        // 9. ERROR HANDLING (Best of V1: Dev Experience)
         console.error("❌ Join API Error:", e.message);
-        
-        // Only show full stack trace in development mode
         if (process.env.NODE_ENV === 'development') {
             console.error(e);
         }
-        
         res.status(500).json({ 
             error: "Failed to generate signature", 
             code: "SIGNATURE_ERROR" 
@@ -297,21 +256,17 @@ app.post('/api/sign-join', async (req, res) => {
 
 io.on('connection', (socket) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
-    
-    // ✅ ENHANCEMENT: Track connection time for debugging
     socket.data.connectedAt = Date.now();
     
-    // 1. Create Room (Standard Mode)
+    // 1. Create Room
     socket.on('create_room', ({ userId, userName }) => {
         try {
-            // ✅ ENHANCEMENT: Input validation
             if (!userId || !userName) {
                 socket.emit('error', 'Missing user credentials');
                 return;
             }
 
             const roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
-            
             socket.data.userId = userId;
 
             const game = gameManager.createGame(roomId, 'MULTIPLAYER', userId, userName);
@@ -319,7 +274,6 @@ io.on('connection', (socket) => {
             socket.emit('room_created', { roomId });
             
             gameManager.broadcastGameState(roomId);
-            
             console.log(`🎮 Room ${roomId} created by ${userName}`);
         } catch (e) {
             console.error('❌ Create room error:', e.message);
@@ -327,16 +281,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. Join Room (Handles Both Web3 & Standard)
+    // 2. Join Room
     socket.on('join_room', ({ roomId, userId, userName }) => {
         try {
-            // ✅ ENHANCEMENT: Input validation
             if (!roomId || !userId || !userName) {
                 socket.emit('error', 'Missing join credentials');
                 return;
             }
             
-            // --- A. LOBBY LOGIC ---
             if (roomId.includes('LOBBY')) {
                 if (!VALID_LOBBIES.has(roomId)) {
                     socket.emit('error', 'Invalid Lobby Room');
@@ -346,7 +298,6 @@ io.on('connection', (socket) => {
                 socket.data.userId = userId;
                 socket.join(roomId);
                 
-                // ✅ ENHANCEMENT: Notify lobby about new player
                 const lobbySize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
                 io.to(roomId).emit('LOBBY_UPDATE', { 
                     type: 'PLAYER_JOINED', 
@@ -358,14 +309,10 @@ io.on('connection', (socket) => {
                 return; 
             }
 
-            // --- B. GAME LOGIC ---
-            
-            // Cleanup: Leave Lobby rooms
             const currentRooms = Array.from(socket.rooms);
             currentRooms.forEach(room => {
                 if (room.includes('LOBBY')) {
                     socket.leave(room);
-                    // ✅ ENHANCEMENT: Notify lobby about player leaving
                     io.to(room).emit('LOBBY_UPDATE', { 
                         type: 'PLAYER_LEFT', 
                         player: userId 
@@ -375,22 +322,19 @@ io.on('connection', (socket) => {
 
             socket.data.userId = userId;
 
-            // Retrieve secret (Bridge from API to Socket)
             const secretData = playerSecrets.get(userId);
             const secret = secretData?.secret;
             
             const game = gameManager.joinGame(roomId, userId, userName);
             
-            // If this is a Web3 Game and we have a secret waiting, attach it
             if (secret && game.mode === 'WEB3') {
                 game.serverSecret = secret;
-                playerSecrets.delete(userId); // Clear temp storage
+                playerSecrets.delete(userId);
                 console.log(`🔐 Secret attached for ${userId.slice(0, 6)}... in ${roomId}`);
             }
 
             socket.join(roomId);
             gameManager.broadcastGameState(roomId);
-            
             console.log(`✅ ${userName} joined game ${roomId}`);
 
         } catch(e) { 
@@ -402,7 +346,6 @@ io.on('connection', (socket) => {
     // 3. Play Bots
     socket.on('play_bots', ({ userId, userName }) => {
         try {
-            // ✅ ENHANCEMENT: Input validation
             if (!userId || !userName) {
                 socket.emit('error', 'Missing user credentials');
                 return;
@@ -416,7 +359,6 @@ io.on('connection', (socket) => {
             
             gameManager.broadcastGameState(roomId);
             gameManager.gameLoop(roomId);
-            
             console.log(`🤖 Bot game started for ${userName}`);
         } catch (e) {
             console.error('❌ Bot game error:', e.message);
@@ -424,16 +366,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 4. Actions (Play Card, Bid)
+    // 4. Actions
     socket.on('action', ({ roomId, type, payload, userId }) => {
         try {
-            // ✅ ENHANCEMENT: Validate action before processing
             if (!roomId || !type || !userId) {
                 socket.emit('error', 'Invalid action parameters');
                 return;
             }
 
-            // ✅ ENHANCEMENT: Verify socket ownership (anti-cheat)
             if (socket.data.userId && socket.data.userId !== userId) {
                 console.warn(`⚠️ User ID mismatch: Socket=${socket.data.userId}, Claimed=${userId}`);
                 socket.emit('error', 'Authentication mismatch');
@@ -450,7 +390,6 @@ io.on('connection', (socket) => {
     // 5. Rejoin
     socket.on('rejoin_room', ({ roomId, userId }) => {
         try {
-            // ✅ ENHANCEMENT: Input validation
             if (!roomId || !userId) {
                 socket.emit('error', 'Missing rejoin credentials');
                 return;
@@ -461,7 +400,6 @@ io.on('connection', (socket) => {
             
             socket.join(roomId);
             socket.emit('rejoin_success', game);
-            
             console.log(`🔄 ${userId.slice(0, 6)}... rejoined ${roomId}`);
         } catch(e) {
             console.error('❌ Rejoin error:', e.message);
@@ -469,14 +407,9 @@ io.on('connection', (socket) => {
         }
     });
 
-    // =========================================================
-    // 6. [NEW] Handle Result Submission (Syncs other players)
-    // =========================================================
+    // 6. Result Submission Sync
     socket.on('RESULT_SUBMITTED_BY_PLAYER', ({ gameId, submittedBy }) => {
         console.log(`📢 Player ${submittedBy} claims submission for ${gameId}`);
-        
-        // Broadcast to EVERYONE in the room (including the sender)
-        // This triggers the "Result Submitted" UI on all clients
         io.to(gameId).emit('GAME_RESULT_SUBMITTED', {
             gameId,
             submittedBy,
@@ -484,7 +417,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // 7. Leave Room handler (cleanup lobbies)
+    // 7. Leave Room
     socket.on('leave_room', ({ roomId, userId }) => {
         try {
             if (roomId && roomId.includes('LOBBY')) {
@@ -500,12 +433,29 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 8. Handle disconnection gracefully
+    // ============================================================
+    // [SNIPER+] 8. Blockchain Transaction Trigger
+    // ============================================================
+    // Frontend emits 'WE_MADE_A_MOVE' immediately before any
+    // blockchain transaction (join, submit, challenge, finalize, etc.)
+    // This wakes the backend from 30s Coma Mode → 3s Sniper Mode
+    // so users see on-chain confirmations fast without wasting CUs
+    // during idle periods.
+    // ============================================================
+    socket.on('WE_MADE_A_MOVE', ({ action } = {}) => {
+        console.log(`🔫 [Sniper] TX trigger from ${socket.id}: ${action || 'unknown'}`);
+        
+        // Guard: only call if blockchain service is initialized
+        if (BlockchainService && typeof BlockchainService.triggerSniperMode === 'function') {
+            BlockchainService.triggerSniperMode(action || 'FrontendTrigger');
+        }
+    });
+
+    // 9. Disconnect
     socket.on('disconnect', (reason) => {
         const duration = Date.now() - (socket.data.connectedAt || Date.now());
         console.log(`🔌 Socket ${socket.id} disconnected (${reason}) - Duration: ${Math.round(duration / 1000)}s`);
         
-        // Cleanup lobbies
         const rooms = Array.from(socket.rooms);
         rooms.forEach(room => {
             if (room.includes('LOBBY')) {
@@ -517,13 +467,14 @@ io.on('connection', (socket) => {
         });
     });
 
-    // ✅ ENHANCEMENT: Error handler for uncaught socket errors
+    // 10. Socket Error
     socket.on('error', (error) => {
         console.error('❌ Socket error:', error.message);
     });
 });
 
-// ✅ ENHANCEMENT: Graceful shutdown handler
+// --- GRACEFUL SHUTDOWN ---
+
 process.on('SIGTERM', () => {
     console.log('⚠️ SIGTERM received. Closing server gracefully...');
     server.close(() => {
@@ -540,19 +491,16 @@ process.on('SIGINT', () => {
     });
 });
 
-// ✅ ENHANCEMENT: Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-    // In production, you might want to log this to a monitoring service
 });
 
 process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught Exception:', error);
-    // In production, you might want to restart the server or alert admins
 });
 
+// --- START ---
 
-// ✅ ENHANCEMENT: Start server with better error handling
 connectDB()
     .then(() => {
         console.log('✅ Database connected');
@@ -562,6 +510,8 @@ connectDB()
             console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
             console.log(`🔗 Client URL: ${process.env.CLIENT_URL || 'any'}`);
             console.log(`⛓️  Blockchain: ${BlockchainService.provider ? 'Active' : 'Inactive'}`);
+            // [SNIPER+] Show poll mode in startup banner
+            console.log(`🎯 Poll Mode: Sniper+ (30s coma / 3s active)`);
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         });
     })
