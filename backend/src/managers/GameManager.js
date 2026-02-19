@@ -240,7 +240,7 @@ class GameManager {
         return this.getPublicGameState(game, userId);
     }
 
-// ==========================================
+    // ==========================================
     //    🗑️ CLEANUP BOTS
     // ==========================================
     cleanupBotGame(userId) {
