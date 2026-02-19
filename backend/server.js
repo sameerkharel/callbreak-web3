@@ -420,13 +420,21 @@ io.on('connection', (socket) => {
     // 7. Leave Room
     socket.on('leave_room', ({ roomId, userId }) => {
         try {
-            if (roomId && roomId.includes('LOBBY')) {
-                socket.leave(roomId);
+            if (!roomId) return;
+            
+            // Physically pull the socket out of the room so they stop getting updates
+            socket.leave(roomId); 
+
+            if (roomId.includes('LOBBY')) {
                 io.to(roomId).emit('LOBBY_UPDATE', { 
                     type: 'PLAYER_LEFT', 
                     player: userId 
                 });
-                console.log(`👋 ${userId.slice(0, 6)}... left ${roomId}`);
+                console.log(`👋 ${userId?.slice(0, 6)}... left lobby ${roomId}`);
+            } else {
+                console.log(`👋 Player left game room: ${roomId}`);
+                // Nuke the bot game if they leave
+                if (userId) gameManager.cleanupBotGame(userId);
             }
         } catch (e) {
             console.error('❌ Leave room error:', e.message);
@@ -456,6 +464,12 @@ io.on('connection', (socket) => {
         const duration = Date.now() - (socket.data.connectedAt || Date.now());
         console.log(`🔌 Socket ${socket.id} disconnected (${reason}) - Duration: ${Math.round(duration / 1000)}s`);
         
+        // Nuke the bot game if they close the tab / refresh the page
+        if (socket.data.userId) {
+            gameManager.cleanupBotGame(socket.data.userId);
+        }
+
+        // Cleanup lobbies
         const rooms = Array.from(socket.rooms);
         rooms.forEach(room => {
             if (room.includes('LOBBY')) {
