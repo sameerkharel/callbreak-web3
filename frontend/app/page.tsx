@@ -612,7 +612,11 @@ export default function App() {
       ui.showSuccess("Logged Out", "You have been successfully logged out.");
   };
 
-  const handleExit = () => {
+const handleExit = () => {
+      if (gameState && gameState.roomId) {
+          socket.emit('leave_room', { roomId: gameState.roomId, userId: myId });
+      }
+
       setShowScoreboard(false);
       setGameState(null);
       setGameResultData(null);
