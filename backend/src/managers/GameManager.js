@@ -240,6 +240,21 @@ class GameManager {
         return this.getPublicGameState(game, userId);
     }
 
+// ==========================================
+    //    🗑️ CLEANUP BOTS
+    // ==========================================
+    cleanupBotGame(userId) {
+        for (const roomId in this.games) {
+            const game = this.games[roomId];
+            // If it's a BOTS game and this user is the human player (Player 0)
+            if (game.mode === 'BOTS' && game.players[0].id === userId) {
+                console.log(`🗑️ Destroying Bot Game ${roomId} (User Exited or Disconnected)`);
+                this.clearTurnTimer(roomId);
+                delete this.games[roomId];
+            }
+        }
+    }
+
     // ==========================================
     //    🕹️ GAMEPLAY LOGIC (Actions)
     // ==========================================
